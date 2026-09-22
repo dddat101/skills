@@ -145,6 +145,16 @@ Detailed guide: [references/pcap_verification_and_evidence.md](references/pcap_v
    - `CAPTURE_FILTER="(udp port 67 or udp port 68) or arp"`
 7. **Strict Mode Array Invocations**:
    - Under `IFS=$'\n\t'`, run multi-word commands as arrays: `CMD=("docker" "compose"); "${CMD[@]}" up`.
+8. **The Upstream WAN Server Standard (The Kea Triad: `kea-dhcp4` + `kea-dhcp6` + `radvd`)**:
+   - **Primary Standard**: Mandate the **Kea Triad (`kea-dhcp4` + `kea-dhcp6` + `radvd`)** for Upstream WAN services in router, gateway (DUT), and carrier-grade dual-stack test environments.
+     - `kea-dhcp4`: Carrier-grade DHCPv4 server managing WAN IP pools, subnet masks, default gateways, and DNS servers.
+     - `kea-dhcp6`: Carrier-grade DHCPv6 server supporting IA_NA (WAN IPv6 address allocation), IA_PD (Prefix Delegation pools per RFC 3633 / RFC 8415 for delegating prefixes such as `/56` or `/60` to CPE routers/DUT), Rapid Commit, and AFTR (DS-Lite RFC 6333 Option 64).
+     - `radvd`: Autonomous Router Advertisement daemon providing granular RFC 4861 / RFC 8106 control (`AdvManagedFlag on`, `AdvOtherConfigFlag on`, `AdvAutonomous on/off`, configurable min/max RA intervals).
+   - **Automated Fallback**: Provide automated fallback to `dnsmasq` when Kea is not installed or encounters socket binding errors, ensuring continuous lab availability and lightweight host-only testing.
+   - **Kea 3.0+ Mandatory Safeguards**:
+     - *Log Path Sandbox Trap*: In Kea 3.0+, configuring non-standard output file paths fails with `COMMAND_PROCESS_ERROR2: invalid path in output, supported path is '/var/log/kea'`. Always configure `"output": "stdout"` in Kea json logger configs so the launcher safely redirects output to `${LOG_DIR}/kea-dhcp*.log`.
+     - *AppArmor Profile Lock Trap*: Always unbind host AppArmor profiles for Kea (`apparmor_parser -R /etc/apparmor.d/usr.sbin.kea-dhcp* 2>/dev/null || true`) and ensure `/run/kea`, `/run/lock/kea`, `${STATE_DIR}/kea` exist with full write permissions (`0777`).
+     - *Netns Socket Readiness Trap (`DHCPSRV_NO_SOCKETS_OPEN`)*: Always ensure interface `eth0` in `ns-wan` has a valid link-local address (`fe80::.../64`) and IPv6 forwarding enabled before launching Kea.
 
 ---
 
@@ -154,7 +164,7 @@ Detailed guide: [references/pcap_verification_and_evidence.md](references/pcap_v
 - [references/principles_and_architecture.md](references/principles_and_architecture.md): Core philosophies, topology models, and directory structure.
 - [references/common_library_guide.md](references/common_library_guide.md): Comprehensive API reference for `scripts/lib/common.sh`.
 - [references/topology_and_lifecycle.md](references/topology_and_lifecycle.md): Topology setup, rollback traps, and interface restoration.
-- [references/dhcp_and_namespace_isolation.md](references/dhcp_and_namespace_isolation.md): Namespace DHCP client (`udhcpc`/`dhclient`) and WAN `dnsmasq`.
+- [references/dhcp_and_namespace_isolation.md](references/dhcp_and_namespace_isolation.md): Namespace DHCP client (`udhcpc`/`dhclient`), Standard Kea Triad WAN Server Architecture (`kea-dhcp4` + `kea-dhcp6` + `radvd` with IA_PD & IA_NA), automated dnsmasq fallback, and standard profile recipes.
 - [references/pcap_verification_and_evidence.md](references/pcap_verification_and_evidence.md): Evidence-based verification, ASCII timeline, and tshark filtering.
 - [references/cli_standards_and_pitfalls.md](references/cli_standards_and_pitfalls.md): The 4 help traps, 6-section usage format, and Canonical CLI pattern.
 - [references/troubleshooting_and_gotchas.md](references/troubleshooting_and_gotchas.md): Common network issues, kernel routing tricks, and firewall gotchas.
@@ -164,6 +174,9 @@ Detailed guide: [references/pcap_verification_and_evidence.md](references/pcap_v
 - [templates/config.env.example](templates/config.env.example): Standard configuration environment template.
 - [templates/gitignore.template](templates/gitignore.template): Standard `.gitignore`.
 - [templates/common.sh](templates/common.sh): Complete production helper library.
+- [templates/kea-dhcp4.conf.in](templates/kea-dhcp4.conf.in): Standard Kea DHCPv4 configuration template.
+- [templates/kea-dhcp6.conf.in](templates/kea-dhcp6.conf.in): Standard Kea DHCPv6 configuration template with IA_NA and IA_PD prefix delegation.
+- [templates/radvd.conf.in](templates/radvd.conf.in): Standard Router Advertisement daemon template.
 - [templates/udhcpc.script](templates/udhcpc.script): Namespace-safe DHCP configuration event script.
 - [templates/setup.sh](templates/setup.sh): Topology setup script with auto-rollback trap.
 - [templates/cleanup.sh](templates/cleanup.sh): Idempotent teardown and NIC restoration script.

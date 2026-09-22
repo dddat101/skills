@@ -91,9 +91,19 @@ assert_safe_test_if <iface>
 | `create_veth_to_ns` | `create_veth_to_ns <ns> <host_veth> <ns_veth> <bridge> <cidr> [gw]` | Creates veth pair, attaches host end to bridge, moves other end to netns with IP and default route. |
 | `exec_in_ns` | `exec_in_ns <ns> <cmd...>` | Runs command inside netns if specified, otherwise on host. |
 | `namespace_ip` | `namespace_ip [ns] [iface]` | Extracts first IPv4 address assigned to interface in netns. |
+| `namespace_ipv6` | `namespace_ipv6 [ns] [iface]` | Extracts first global IPv6 address assigned to interface in netns. |
 | `namespace_mac` | `namespace_mac [ns] [iface]` | Reads hardware MAC address from sysfs. |
 
-### 2.6. Interface Recovery & Cleanup
+### 2.6. Upstream WAN Services & The Kea Triad Standard
+
+| Function | Signature | Description |
+| :--- | :--- | :--- |
+| `prepare_kea_runtime` | `prepare_kea_runtime` | Unloads host AppArmor profiles for Kea (`apparmor_parser -R`) and ensures runtime directories (`/run/kea`, `/run/lock/kea`, `${STATE_DIR}/kea`) exist with `0777` permissions. |
+| `render_wan_template` | `render_wan_template <src_tpl> <dst_conf> [iface]` | Substitutes environment variables into Kea and radvd `.conf.in` templates. |
+| `wan_dhcp_server` | `wan_dhcp_server <action> [ip_version] [wan_ns] [wan_if]` | Controls Upstream WAN services (`start`, `stop`, `status`). Orchestrates the **Kea Triad (`kea-dhcp4` + `kea-dhcp6` + `radvd`)** with IA_NA, IA_PD prefix delegation (RFC 3633/8415), RDNSS, and provides automated fallback to `dnsmasq`. |
+| `wait_for_ipv6_dad` | `wait_for_ipv6_dad [ns] [iface] [max_wait]` | Waits for IPv6 Duplicate Address Detection (DAD) tentative flag to clear before socket binding. |
+
+### 2.7. Interface Recovery & Cleanup
 
 ```bash
 restore_physical_interface <iface>
@@ -109,7 +119,7 @@ tear_down_physical_interface <iface>
 ```
 - Alternative isolation mode: flushes IP, brings link `DOWN`, and unbinds from bridge.
 
-### 2.7. Deterministic Synchronization & Socket Polling
+### 2.8. Deterministic Synchronization & Socket Polling
 
 ```bash
 is_port_listening <port> [host] [ns]
@@ -126,7 +136,7 @@ wait_for_http <url> [expected_code] [timeout] [ns]
 ```
 - Polls HTTP endpoint via `curl -sk` until matching status code is returned.
 
-### 2.8. Process Supervision & Daemon Management
+### 2.9. Process Supervision & Daemon Management
 
 ```bash
 start_daemon <pid_file> <log_file> <service_name> [ns] <command...>
@@ -150,7 +160,7 @@ stop_process_by_pattern <pattern> [name]
 ```
 - Terminates orphan background processes by regex match with escalating signals.
 
-### 2.9. PCAP & Telemetry Utilities
+### 2.10. PCAP & Telemetry Utilities
 
 ```bash
 get_latest_pcap

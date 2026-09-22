@@ -146,11 +146,15 @@ main() {
         elif [[ "${role}" == "lan" ]]; then
             assert_safe_test_if "${TEST_IF}"
             bridge_create "${LAN_BRIDGE}"; attach_physical_to_bridge "${TEST_IF}" "${LAN_BRIDGE}"
-            create_veth_to_ns "${LAN_NS:-ns-lan}" "veth-lancli" "eth-lan" "${LAN_BRIDGE}" "${LAN_CLIENT_IP:-192.168.1.100}/${LAN_PREFIX:-24}" "${DUT_LAN_IP:-192.168.1.1}"
         fi
     fi
 
-    # 3. Save runtime topology state
+    # 3. Upstream WAN Services (Kea Triad Standard: kea-dhcp4 + kea-dhcp6 + radvd)
+    if [[ "${ENABLE_WAN_DHCP:-0}" == "1" ]] && [[ "${role}" == "single" || "${role}" == "wan" ]]; then
+        wan_dhcp_server start "${IP_VERSION:-4}" "${WAN_NS:-ns-wan}" "eth-wan"
+    fi
+
+    # 4. Save runtime topology state
     cat >"${STATE_DIR}/topology_state.env" <<EOF
 TOPOLOGY_MODE='${mode}'
 LAB_ROLE='${role}'

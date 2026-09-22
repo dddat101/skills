@@ -74,7 +74,7 @@ main() {
     echo "===> Scaffolding Network Test Lab: ${lab_name} in ${target_dir}"
 
     # 1. Create directory tree
-    mkdir -p "${target_dir}"/{captures,logs,state,tools,docs,scripts/lib}
+    mkdir -p "${target_dir}"/{captures,logs,state,tools,docs,scripts/lib,config/kea,config/radvd}
     touch "${target_dir}/captures/.gitkeep"
     touch "${target_dir}/logs/.gitkeep"
     touch "${target_dir}/state/.gitkeep"
@@ -85,6 +85,9 @@ main() {
     cp "${TEMPLATES_DIR}/config.env.example" "${target_dir}/config.env"
     cp "${TEMPLATES_DIR}/common.sh" "${target_dir}/scripts/lib/common.sh"
     cp "${TEMPLATES_DIR}/udhcpc.script" "${target_dir}/scripts/lib/udhcpc.script"
+    cp "${TEMPLATES_DIR}/kea-dhcp4.conf.in" "${target_dir}/config/kea/kea-dhcp4.conf.in"
+    cp "${TEMPLATES_DIR}/kea-dhcp6.conf.in" "${target_dir}/config/kea/kea-dhcp6.conf.in"
+    cp "${TEMPLATES_DIR}/radvd.conf.in" "${target_dir}/config/radvd/radvd.conf.in"
     cp "${TEMPLATES_DIR}/setup.sh" "${target_dir}/scripts/setup.sh"
     cp "${TEMPLATES_DIR}/cleanup.sh" "${target_dir}/scripts/cleanup.sh"
     cp "${TEMPLATES_DIR}/capture.sh" "${target_dir}/scripts/capture.sh"

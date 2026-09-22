@@ -111,6 +111,10 @@ main() {
             ip netns exec "${ns}" pkill -TERM tcpdump 2>/dev/null || true
             ip netns exec "${ns}" pkill -TERM udhcpc 2>/dev/null || true
             ip netns exec "${ns}" pkill -TERM dhclient 2>/dev/null || true
+            ip netns exec "${ns}" pkill -TERM dnsmasq 2>/dev/null || true
+            ip netns exec "${ns}" pkill -TERM radvd 2>/dev/null || true
+            ip netns exec "${ns}" pkill -TERM kea-dhcp4 2>/dev/null || true
+            ip netns exec "${ns}" pkill -TERM kea-dhcp6 2>/dev/null || true
         fi
     done
 
@@ -160,6 +164,7 @@ main() {
     # 8. Clean runtime state files
     rm -f "${STATE_DIR}/topology_state.env" "${STATE_DIR}/last_capture.env" 2>/dev/null || true
     rm -f "${STATE_DIR}"/*.pid "${STATE_DIR}"/*.leases "${STATE_DIR}"/*.conf "${STATE_DIR}"/*.state 2>/dev/null || true
+    rm -f /run/kea/*.pid /run/lock/kea/*.pid /run/kea/logger_lockfile /run/lock/kea/logger_lockfile 2>/dev/null || true
 
     if (( clean_logs_flag == 1 )); then clean_logs; fi
     if (( clean_captures_flag == 1 )); then clean_captures; fi
