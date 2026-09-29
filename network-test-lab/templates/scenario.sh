@@ -7,7 +7,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -84,8 +85,10 @@ main() {
 
     print_header "STARTING TEST SCENARIO: [${scenario^^}]"
 
-    # Clean audit logs for fresh run
-    rm -f "${LOG_DIR}"/*audit*.jsonl 2>/dev/null || true
+    # Clean audit logs for fresh full run
+    if [[ "${scenario}" == "all" ]]; then
+        rm -f "${LOG_DIR}"/*audit*.jsonl 2>/dev/null || true
+    fi
 
     # Phase 0: Start Background Capture
     if [[ -x "${SCRIPT_DIR}/capture.sh" ]]; then

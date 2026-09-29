@@ -7,7 +7,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly SKILL_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+readonly SKILL_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 readonly TEMPLATES_DIR="${SKILL_DIR}/templates"
 
 usage() {
@@ -164,7 +165,7 @@ sudo ./scripts/cleanup.sh
 EOF
 
     # 4. Permissions
-    chmod +x "${target_dir}"/scripts/*.sh "${target_dir}"/scripts/lib/*.sh "${target_dir}"/scripts/lib/*.script
+    find "${target_dir}/scripts" -type f \( -name '*.sh' -o -name '*.script' \) -exec chmod +x {} + 2>/dev/null || true
     chmod 0777 "${target_dir}/captures" "${target_dir}/logs" "${target_dir}/state" 2>/dev/null || true
 
     echo "===> Test lab scaffolding complete at: ${target_dir}"

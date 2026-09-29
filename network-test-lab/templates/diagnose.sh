@@ -7,7 +7,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -66,7 +67,7 @@ main() {
     # 2. Host Network Safety Assertions
     print_section "HOST NETWORK SAFETY"
     local default_if
-    default_if="$(ip route show default 2>/dev/null | awk '/dev/ {print $5}' | head -n1 || echo "")"
+    default_if="$((ip route show default 2>/dev/null || true) | awk '/dev/ {print $5}' | head -n1 || echo "")"
     if [[ -n "${default_if}" ]]; then
         check_item "Host Default Route" "PASS" "Interface: ${default_if}"
     else

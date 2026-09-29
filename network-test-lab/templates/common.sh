@@ -7,8 +7,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly PROJECT_ROOT="$(cd "${SCRIPT_LIB_DIR}/../.." && pwd)"
+readonly SCRIPT_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly PROJECT_ROOT="$(cd -- "${SCRIPT_LIB_DIR}/../.." && pwd -P)"
 readonly CONFIG_FILE="${PROJECT_ROOT}/config.env"
 readonly LOG_TAG="LAB-FRAMEWORK"
 
@@ -22,7 +22,7 @@ die()         { log_error "$*"; exit 1; }
 
 log_debug() {
     if [[ "${DEBUG:-0}" == "1" || "${VERBOSE:-0}" == "1" ]]; then
-        printf '\e[1;34m[DEBUG]\e[0m   %s\n' "$*"
+        printf '\e[1;34m[DEBUG]\e[0m   %s\n' "$*" >&2
     fi
 }
 
@@ -147,21 +147,21 @@ assert_safe_test_if() {
 
 namespace_ip() {
     local ns="${1:-ns-wan}"
-    local iface="${2:-eth-wan}"
+    local iface="${2:-${NS_IF:-eth-wan}}"
     if ns_exists "${ns}"; then
-        ip netns exec "${ns}" ip -4 -o addr show dev "${iface}" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || echo ""
+        (ip netns exec "${ns}" ip -4 -o addr show dev "${iface}" 2>/dev/null || true) | awk '{print $4}' | cut -d/ -f1 | head -n1 || echo ""
     else
-        ip -4 -o addr show dev "${iface}" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || echo ""
+        (ip -4 -o addr show dev "${iface}" 2>/dev/null || true) | awk '{print $4}' | cut -d/ -f1 | head -n1 || echo ""
     fi
 }
 
 namespace_mac() {
     local ns="${1:-ns-wan}"
-    local iface="${2:-eth-wan}"
+    local iface="${2:-${NS_IF:-eth-wan}}"
     if ns_exists "${ns}"; then
-        ip netns exec "${ns}" cat "/sys/class/net/${iface}/address" 2>/dev/null || echo ""
+        (ip netns exec "${ns}" cat "/sys/class/net/${iface}/address" 2>/dev/null || true) | head -n1 || echo ""
     else
-        cat "/sys/class/net/${iface}/address" 2>/dev/null || echo ""
+        (cat "/sys/class/net/${iface}/address" 2>/dev/null || true) | head -n1 || echo ""
     fi
 }
 
@@ -386,16 +386,6 @@ wait_for_ipv6_dad() {
         sleep 0.1
     done
     return 0
-}
-
-namespace_ip() {
-    local ns="${1:-ns-wan}"
-    local iface="${2:-eth0}"
-    if ns_exists "${ns}"; then
-        (ip netns exec "${ns}" ip -4 -o addr show dev "${iface}" 2>/dev/null || true) | awk '{print $4}' | cut -d/ -f1 | head -n1 || echo ""
-    else
-        (ip -4 -o addr show dev "${iface}" 2>/dev/null || true) | awk '{print $4}' | cut -d/ -f1 | head -n1 || echo ""
-    fi
 }
 
 namespace_ipv6() {
@@ -771,14 +761,14 @@ is_dut_ssh_ready() {
 get_latest_pcap() {
     if [[ -f "${STATE_DIR}/last_capture.env" ]]; then
         local pcap_from_env
-        pcap_from_env="$(grep '^LAST_PCAP=' "${STATE_DIR}/last_capture.env" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
+        pcap_from_env="$(grep '^LAST_PCAP=' "${STATE_DIR}/last_capture.env" 2>/dev/null | cut -d= -f2- | tr -d "'\"" || true)"
         if [[ -n "${pcap_from_env}" && -f "${pcap_from_env}" ]]; then
             printf '%s\n' "${pcap_from_env}"; return 0
         fi
     fi
     if [[ -d "${CAPTURE_DIR}" ]]; then
         local newest
-        newest="$(find "${CAPTURE_DIR}" -name '*.pcap' -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}' || true)"
+        newest="$( (find "${CAPTURE_DIR}" -maxdepth 1 -name '*.pcap*' -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}') || true)"
         if [[ -n "${newest}" && -f "${newest}" ]]; then
             printf '%s\n' "${newest}"; return 0
         fi
@@ -788,6 +778,8 @@ get_latest_pcap() {
 
 format_bytes() {
     local bytes="${1:-0}"
+    bytes="${bytes//[^0-9]/}"
+    [[ -n "${bytes}" ]] || bytes=0
     if (( bytes < 1024 )); then printf '%d B' "${bytes}"
     elif (( bytes < 1048576 )); then printf '%.1f KB' "$((bytes * 10 / 1024))e-1"
     elif (( bytes < 1073741824 )); then printf '%.1f MB' "$((bytes * 10 / 1048576))e-1"

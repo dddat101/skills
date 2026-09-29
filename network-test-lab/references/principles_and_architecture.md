@@ -4,7 +4,7 @@ This document details the foundation of the Linux Network Test Lab Framework, co
 
 ---
 
-## 1. The 11 Core Philosophies
+## 1. The 12 Core Philosophies
 
 1. **Traffic Isolation via Network Namespaces (`netns`)**:
    - Entities (Clients, Mock Servers, Attackers, Monitors) are segregated into dedicated Linux namespaces.
@@ -52,6 +52,12 @@ This document details the foundation of the Linux Network Test Lab Framework, co
 11. **CLI Standards & User-Friendly Help**:
     - 100% of scripts support `-h` and `--help` with exit code `0`, requiring no `sudo`, no pre-installed dependencies, and no existing runtime state.
     - Usage messages follow the standard 6-section structure: `Description`, `Usage`, `Options / Arguments`, `Subcommands`, `Examples`, and `Suggested Next Steps`.
+
+12. **Generic Protocol Abstraction & Zero-Vendor Leakage**:
+    - Labs MUST be designed as **Generic Protocol Test Labs**.
+    - **No Vendor Names**: Strictly avoid vendor-specific, customer-specific, or carrier-specific names (e.g., no Cisco, Huawei, LG U+, Juniper, Broadcom, Nokia, etc.) in code, variables, comments, commit messages, or documentation. Always use generic networking terms: `DUT` (Device Under Test), `Gateway`, `CPE`, `Carrier Edge`, `Router`, `Client`, `Server`.
+    - **No Proprietary Test Case / Requirement Codes**: Do NOT hardcode proprietary requirement numbers, customer RFP/SRS clause IDs, or customer-specific test case names (e.g., `TC_LGUPLUS_01`, `REQ_4.2.1_LGU`). All test cases must be organized by standard RFC/IEEE protocols and technical capabilities (e.g., `TC_NAT_BASIC_RFC3022`, `TC_RTP_RTCP_RFC3550`, `TC_CONE_NAT_RFC3489`, `TC_FRAGMENTATION_RFC791`, `TC_QOS_DSCP_RFC2474`).
+    - **Clean Protocol Abstraction & Config-Driven Customization**: Any specific value requested by a customer (e.g., specific blacklisted ports, specific MAC addresses, custom timeouts, DSCP values) must be expressed as generic configuration keys in `config.env` (e.g., `NAT_BLOCKED_PORT_LIST`, `PRIORITY_DSCP_VALUE`, `PASSTHROUGH_CLIENT_MAC`) rather than hardcoding proprietary constants.
 
 ---
 

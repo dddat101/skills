@@ -7,7 +7,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -108,8 +109,8 @@ main() {
 
     while (( $# > 0 )); do
         case "$1" in
-            --virtual|-v|--no-dut) mode="virtual"; shift ;;
-            --single|-s)          mode="physical"; role="single"; shift ;;
+            --virtual|-v|--no-dut)             mode="virtual"; shift ;;
+            --single|-s|--dual|--physical)     mode="physical"; role="single"; shift ;;
             --wan)                mode="physical"; role="wan"; shift ;;
             --lan)                mode="physical"; role="lan"; shift ;;
             -h|--help)            usage; exit 0 ;;

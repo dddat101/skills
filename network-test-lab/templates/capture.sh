@@ -7,7 +7,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
@@ -73,7 +74,9 @@ start_capture() {
     if [[ "${cap_tool}" == "tcpdump" ]]; then
         cap_cmd=("tcpdump" "-ni" "${target_if}" "-s" "0" "-U" "-w" "${pcap_file}")
         if [[ -n "${bpf_filter}" ]]; then
-            cap_cmd+=(${bpf_filter})
+            local -a filter_parts=()
+            read -r -a filter_parts <<< "${bpf_filter}"
+            cap_cmd+=("${filter_parts[@]}")
         fi
     else
         cap_cmd=("tshark" "-i" "${target_if}" "-l" "-w" "${pcap_file}")
@@ -117,6 +120,7 @@ stop_capture() {
     if [[ -f "${STATE_DIR}/capture.pid" ]]; then
         stop_pidfile "${STATE_DIR}/capture.pid" "Packet Capture"
     fi
+    find "${CAPTURE_DIR}" -maxdepth 1 -name '*.pcap*' -type f -exec chmod 0666 {} + 2>/dev/null || true
 }
 
 show_status() {

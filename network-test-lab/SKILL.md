@@ -10,7 +10,7 @@ A production framework for building automated, reproducible, evidence-based Netw
 
 ---
 
-## 1. The 11 Golden Principles
+## 1. The 12 Golden Principles
 
 | # | Principle | Enforcement |
 | :- | :--- | :--- |
@@ -25,6 +25,7 @@ A production framework for building automated, reproducible, evidence-based Netw
 | 9 | **Deterministic Synchronization** | No arbitrary `sleep`. Use `wait_for_port <port> [host] [timeout] [ns]` and `wait_for_http`. |
 | 10 | **Reliable Process Lifecycle** | Supervise via `.pid` files, detect stale PIDs (`kill -0`), escalate stop: `SIGINT` $\rightarrow$ `SIGTERM` $\rightarrow$ `SIGKILL`. |
 | 11 | **Canonical CLI Standards** | 100% of scripts support `-h`/`--help` with exit code `0` and 6-section `usage()` structure. |
+| 12 | **Generic Protocol Abstraction & Zero-Vendor Leakage** | Strictly generic protocol design. Never embed vendor names, customer test case codes, or proprietary requirement text. Standard RFC/IEEE terminology only. |
 
 For a complete breakdown of each principle, see [references/principles_and_architecture.md](references/principles_and_architecture.md).
 
@@ -155,6 +156,12 @@ Detailed guide: [references/pcap_verification_and_evidence.md](references/pcap_v
      - *Log Path Sandbox Trap*: In Kea 3.0+, configuring non-standard output file paths fails with `COMMAND_PROCESS_ERROR2: invalid path in output, supported path is '/var/log/kea'`. Always configure `"output": "stdout"` in Kea json logger configs so the launcher safely redirects output to `${LOG_DIR}/kea-dhcp*.log`.
      - *AppArmor Profile Lock Trap*: Always unbind host AppArmor profiles for Kea (`apparmor_parser -R /etc/apparmor.d/usr.sbin.kea-dhcp* 2>/dev/null || true`) and ensure `/run/kea`, `/run/lock/kea`, `${STATE_DIR}/kea` exist with full write permissions (`0777`).
      - *Netns Socket Readiness Trap (`DHCPSRV_NO_SOCKETS_OPEN`)*: Always ensure interface `eth0` in `ns-wan` has a valid link-local address (`fe80::.../64`) and IPv6 forwarding enabled before launching Kea.
+9. **The Vendor & Proprietary Specificity Leakage Trap (Generic Protocol Lab Mandate)**:
+   - Labs MUST be designed strictly as **Generic Protocol Test Labs**.
+   - **Never** embed specific vendor names (e.g., Cisco, Huawei, LG U+, Juniper, Nokia, MikroTik, Broadcom, etc.), customer-specific project names, or proprietary requirement/test case identifiers in file names, script logic, function names, log tags, packet payloads, PCAP display filters, comments, or documentation.
+   - All tests, metrics, and scripts must strictly use generic RFC/IEEE networking terminology: `DUT` (Device Under Test), `Gateway`, `CPE`, `Carrier-Grade Edge`, `Router`, `Client`, `Server`, `STB`, `SIP_UA`.
+   - Test suites must be organized around open standard protocols and behaviors (e.g., RFC 3022 NAT/NAPT, RFC 3550 RTP/RTCP, RFC 3489/4787 Cone NAT, RFC 791/815 Fragmentation, RFC 2474 DiffServ QoS, RFC 8415 DHCPv6, RFC 3633 DHCPv6-PD).
+   - Parameterize all test variables in `config.env` (e.g. `PORT_BLACK_LIST`, `RTP_PORT_OFFSET`, `PASSTHROUGH_CLIENT_MAC`, `DSCP_TARGET_VALUE`) rather than hardcoding proprietary or customer-specific constants in scripts or test tools.
 
 ---
 
