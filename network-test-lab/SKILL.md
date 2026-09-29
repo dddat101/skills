@@ -25,7 +25,7 @@ A production framework for building automated, reproducible, evidence-based Netw
 | 9 | **Deterministic Synchronization** | No arbitrary `sleep`. Use `wait_for_port <port> [host] [timeout] [ns]` and `wait_for_http`. |
 | 10 | **Reliable Process Lifecycle** | Supervise via `.pid` files, detect stale PIDs (`kill -0`), escalate stop: `SIGINT` $\rightarrow$ `SIGTERM` $\rightarrow$ `SIGKILL`. |
 | 11 | **Canonical CLI Standards** | 100% of scripts support `-h`/`--help` with exit code `0` and 6-section `usage()` structure. |
-| 12 | **Generic Protocol Abstraction & Zero-Vendor Leakage** | Strictly generic protocol design. Never embed vendor names, customer test case codes, or proprietary requirement text. Standard RFC/IEEE terminology only. |
+| 12 | **Generic Protocol Abstraction & Project Naming Standard** | Strictly generic protocol design. Project names MUST be concise, meaningful, lowercase snake_case, and generic technical terms only. ZERO vendor names, carrier names, or requirement codes. |
 | 13 | **Mandatory WAN Dual-Stack & Full DHCPv6 Modes** | WAN always provisions concurrent DHCPv4 & DHCPv6 (`IP_VERSION="dual"`). Supports dual-stack, SLAAC, stateless, stateful, and IA_PD. |
 
 For a complete breakdown of each principle, see [references/principles_and_architecture.md](references/principles_and_architecture.md).
@@ -72,9 +72,28 @@ To generate a complete, standardized lab skeleton in seconds:
 ./scripts/scaffold_lab.sh <target_directory> [--virtual | --single]
 
 # Example:
-./scripts/scaffold_lab.sh /home/dddat/workspace/my_dhcp_lab --virtual
+./scripts/scaffold_lab.sh /home/dddat/workspace/nat_lab --virtual
 ```
 This generates all scripts, templates, documentation, and directory permissions automatically.
+
+#### Mandatory Project Naming Standard:
+Every test lab directory MUST adhere strictly to the following rules:
+1. **Concise & Meaningful (Ngắn gọn, đủ nghĩa)**:
+   - Pattern: `<protocol_or_capability>_[scope_]lab` (strictly lowercase `snake_case`, ideally 2–3 words, $\le 32$ characters).
+   - Examples: `nat_lab`, `ipv6_gateway_lab`, `qos_dscp_lab`, `voip_rtp_lab`, `fragmentation_lab`.
+2. **Zero Vendor & Carrier Leakage**:
+   - **Never** include vendor, chipmaker, or carrier names (NO `cisco`, `huawei`, `zte`, `juniper`, `nokia`, `lguplus`, `vnpt`, `viettel`, `broadcom`, `qualcomm`, `mediatek`, `realtek`).
+3. **Zero Requirement & Test Case Code Leakage**:
+   - **Never** include RFP/SRS clause IDs, customer requirement codes, or test case IDs (NO `tc01`, `tc_05`, `req_4_2_1`, `clause_5`).
+   - Name the project strictly after the **generic technical protocol/capability**.
+4. **Good vs. Forbidden Examples**:
+   | Forbidden Project Name | Approved Project Name | Rationale |
+   | :--- | :--- | :--- |
+   | `lguplus_cisco_nat_test_lab` | `nat_lab` | Zero vendor leakage; concise & RFC 3022 standard. |
+   | `tc05_out_of_order_reassembly_lab` | `fragmentation_lab` | Zero requirement ID leakage; RFC 791/815 protocol term. |
+   | `carrier_grade_ipv6_dual_stack_transition_mechanism_test_lab` | `ipv6_gateway_lab` | Concise (2 words) while fully expressive. |
+   | `req_4_2_1_dscp46_qos_delay_lab` | `qos_dscp_lab` | Zero RFP requirement code; RFC 2474 DiffServ term. |
+   | `huawei_tr069_cwmp_integration_lab` | `tr069_mgmt_lab` | Zero vendor leakage; BBF TR-069 generic standard. |
 
 ### Workflow B: Topology Setup & Teardown
 ```bash
@@ -166,9 +185,10 @@ Detailed guide: [references/pcap_verification_and_evidence.md](references/pcap_v
      - *Log Path Sandbox Trap*: In Kea 3.0+, configuring non-standard output file paths fails with `COMMAND_PROCESS_ERROR2: invalid path in output, supported path is '/var/log/kea'`. Always configure `"output": "stdout"` in Kea json logger configs so the launcher safely redirects output to `${LOG_DIR}/kea-dhcp*.log`.
      - *AppArmor Profile Lock Trap*: Always unbind host AppArmor profiles for Kea (`apparmor_parser -R /etc/apparmor.d/usr.sbin.kea-dhcp* 2>/dev/null || true`) and ensure `/run/kea`, `/run/lock/kea`, `${STATE_DIR}/kea` exist with full write permissions (`0777`).
      - *Netns Socket Readiness Trap (`DHCPSRV_NO_SOCKETS_OPEN`)*: Always ensure interface `eth0` in `ns-wan` has a valid link-local address (`fe80::.../64`) and IPv6 forwarding enabled before launching Kea.
-9. **The Vendor & Proprietary Specificity Leakage Trap (Generic Protocol Lab Mandate)**:
+9. **The Vendor & Proprietary Specificity Leakage Trap (Generic Protocol Lab & Naming Mandate)**:
    - Labs MUST be designed strictly as **Generic Protocol Test Labs**.
-   - **Never** embed specific vendor names (e.g., Cisco, Huawei, LG U+, Juniper, Nokia, MikroTik, Broadcom, etc.), customer-specific project names, or proprietary requirement/test case identifiers in file names, script logic, function names, log tags, packet payloads, PCAP display filters, comments, or documentation.
+   - **Project Naming Mandate**: Lab directory names MUST be concise and meaningful (2–3 words, lowercase snake_case, e.g. `nat_lab`, `ipv6_gateway_lab`, `qos_dscp_lab`). Never embed vendor names, customer names, or specific requirement/test case identifiers (`tc01`, `req_4_2_1`).
+   - **Never** embed specific vendor names (e.g., Cisco, Huawei, LG U+, Juniper, Nokia, MikroTik, Broadcom, Qualcomm, MediaTek, Realtek, etc.), customer-specific project names, or proprietary requirement/test case identifiers in file names, script logic, function names, log tags, packet payloads, PCAP display filters, comments, or documentation.
    - All tests, metrics, and scripts must strictly use generic RFC/IEEE networking terminology: `DUT` (Device Under Test), `Gateway`, `CPE`, `Carrier-Grade Edge`, `Router`, `Client`, `Server`, `STB`, `SIP_UA`.
    - Test suites must be organized around open standard protocols and behaviors (e.g., RFC 3022 NAT/NAPT, RFC 3550 RTP/RTCP, RFC 3489/4787 Cone NAT, RFC 791/815 Fragmentation, RFC 2474 DiffServ QoS, RFC 8415 DHCPv6, RFC 3633 DHCPv6-PD).
    - Parameterize all test variables in `config.env` (e.g. `PORT_BLACK_LIST`, `RTP_PORT_OFFSET`, `PASSTHROUGH_CLIENT_MAC`, `DSCP_TARGET_VALUE`) rather than hardcoding proprietary or customer-specific constants in scripts or test tools.

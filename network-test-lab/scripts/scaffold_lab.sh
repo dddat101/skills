@@ -22,6 +22,12 @@ Description:
   complete with bash strict mode libraries, setup/cleanup scripts,
   packet capture lifecycle, diagnostic tools, and PCAP verification.
 
+Project Naming Rules:
+  - Concise & Meaningful: Lowercase snake_case, 2-3 words (e.g. nat_lab, ipv6_gateway_lab).
+  - Generic Technical Scope: Standard RFC/IEEE protocol names only.
+  - Zero Vendor Leakage: NO vendor/carrier names (Cisco, Huawei, LGU+, Broadcom, etc.).
+  - Zero Requirement Leakage: NO customer requirement IDs, RFP clauses, or TC numbers.
+
 Usage:
   ./scripts/scaffold_lab.sh <target_directory> [OPTIONS]
   ./scripts/scaffold_lab.sh -h | --help
@@ -29,11 +35,13 @@ Usage:
 Options:
   --virtual, -v    Configure default topology to Virtual / No-DUT simulation [Default]
   --single, -s     Configure default topology to Single-PC Dual-NIC physical mode
+  --force, -f      Bypass project naming validation warnings
   -h, --help       Show this help message and exit
 
 Examples:
-  ./scripts/scaffold_lab.sh /home/dddat/workspace/dhcp_snooping_lab --virtual
-  ./scripts/scaffold_lab.sh ./my_vlan_lab --single
+  ./scripts/scaffold_lab.sh /home/dddat/workspace/nat_lab --virtual
+  ./scripts/scaffold_lab.sh /home/dddat/workspace/ipv6_gateway_lab --virtual
+  ./scripts/scaffold_lab.sh ./qos_dscp_lab --single
 
 Suggested Next Steps:
   1. cd into generated lab directory
@@ -42,6 +50,48 @@ Suggested Next Steps:
   4. Initialize topology:   sudo ./scripts/setup.sh
 ==================================================================
 EOF
+}
+
+validate_project_name() {
+    local name="$1"
+    local force="${2:-0}"
+    local lower_name
+    lower_name="$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]')"
+
+    # 1. Format & character set assertion: strictly lowercase snake_case or kebab-case
+    if [[ ! "${name}" =~ ^[a-z0-9_]+$ && ! "${name}" =~ ^[a-z0-9-]+$ ]]; then
+        printf '\e[1;31m[ERROR]\e[0m Invalid project name: "%s"\n' "${name}" >&2
+        printf '        Rule: Project name must be strictly lowercase snake_case (e.g. "nat_lab", "ipv6_gateway_lab").\n' >&2
+        return 1
+    fi
+
+    # 2. Conciseness check (should not be overly long, recommended <= 32 chars and <= 4 segments)
+    local seg_count
+    seg_count="$(awk -F'[_\\-]' '{print NF}' <<< "${name}")"
+    if (( seg_count > 4 || ${#name} > 32 )); then
+        printf '\e[1;33m[WARN]\e[0m Project name "%s" is overly verbose (%d parts, %d chars).\n' "${name}" "${seg_count}" "${#name}" >&2
+        printf '       Rule: Keep project names concise and meaningful (e.g. "nat_lab", "qos_dscp_lab", "ipv6_gateway_lab").\n' >&2
+    fi
+
+    # 3. Forbidden Vendor & Carrier Leakage Check
+    local vendor_pattern='cisco|huawei|zte|juniper|nokia|mikrotik|broadcom|qualcomm|mediatek|realtek|lguplus|lgu|vnpt|viettel|fpt|skt|kt'
+    if [[ "${lower_name}" =~ (${vendor_pattern}) ]]; then
+        printf '\e[1;31m[ERROR]\e[0m Vendor or carrier name leakage detected in project name: "%s"\n' "${name}" >&2
+        printf '        Rule: Project names MUST NOT contain specific vendor or carrier names.\n' >&2
+        printf '        Use generic technical protocol terms only (e.g. "nat_lab", "dhcp_lab", "ipv6_gateway_lab").\n' >&2
+        if (( force == 0 )); then return 1; fi
+    fi
+
+    # 4. Forbidden Requirement / Test Case Code Leakage Check
+    local req_pattern='(^|_)tc[0-9]+|(^|_)req[0-9]+|rfp|srs|clause'
+    if [[ "${lower_name}" =~ (${req_pattern}) ]]; then
+        printf '\e[1;31m[ERROR]\e[0m Proprietary requirement or test case code detected in project name: "%s"\n' "${name}" >&2
+        printf '        Rule: Project names MUST NOT encode customer requirement numbers, RFP clauses, or test case IDs.\n' >&2
+        printf '        Name the lab after the generic technical capability (e.g. "fragmentation_lab" instead of "tc05_lab").\n' >&2
+        if (( force == 0 )); then return 1; fi
+    fi
+
+    return 0
 }
 
 main() {
@@ -59,11 +109,13 @@ main() {
 
     local target_dir="$1"; shift
     local default_mode="virtual"
+    local force_naming=0
 
     while (( $# > 0 )); do
         case "$1" in
             --virtual|-v) default_mode="virtual"; shift ;;
             --single|-s)  default_mode="physical"; shift ;;
+            --force|-f)   force_naming=1; shift ;;
             -h|--help)    usage; exit 0 ;;
             *)            echo "Unknown option: $1" >&2; usage; exit 1 ;;
         esac
@@ -71,6 +123,10 @@ main() {
 
     local lab_name
     lab_name="$(basename "${target_dir}")"
+
+    if ! validate_project_name "${lab_name}" "${force_naming}"; then
+        exit 1
+    fi
 
     echo "===> Scaffolding Network Test Lab: ${lab_name} in ${target_dir}"
 

@@ -53,10 +53,20 @@ This document details the foundation of the Linux Network Test Lab Framework, co
     - 100% of scripts support `-h` and `--help` with exit code `0`, requiring no `sudo`, no pre-installed dependencies, and no existing runtime state.
     - Usage messages follow the standard 6-section structure: `Description`, `Usage`, `Options / Arguments`, `Subcommands`, `Examples`, and `Suggested Next Steps`.
 
-12. **Generic Protocol Abstraction & Zero-Vendor Leakage**:
+12. **Generic Protocol Abstraction & Project Naming Standard**:
     - Labs MUST be designed as **Generic Protocol Test Labs**.
-    - **No Vendor Names**: Strictly avoid vendor-specific, customer-specific, or carrier-specific names (e.g., no Cisco, Huawei, LG U+, Juniper, Broadcom, Nokia, etc.) in code, variables, comments, commit messages, or documentation. Always use generic networking terms: `DUT` (Device Under Test), `Gateway`, `CPE`, `Carrier Edge`, `Router`, `Client`, `Server`.
-    - **No Proprietary Test Case / Requirement Codes**: Do NOT hardcode proprietary requirement numbers, customer RFP/SRS clause IDs, or customer-specific test case names (e.g., `TC_LGUPLUS_01`, `REQ_4.2.1_LGU`). All test cases must be organized by standard RFC/IEEE protocols and technical capabilities (e.g., `TC_NAT_BASIC_RFC3022`, `TC_RTP_RTCP_RFC3550`, `TC_CONE_NAT_RFC3489`, `TC_FRAGMENTATION_RFC791`, `TC_QOS_DSCP_RFC2474`).
+    - **Mandatory Project Naming Standard**:
+      - **Concise & Meaningful (Ngắn gọn, đủ nghĩa)**: Project directory names must be short, descriptive, and strictly lowercase `snake_case` (ideally 2–3 words, $\le 32$ characters), ending with `_lab` (e.g., `nat_lab`, `ipv6_gateway_lab`, `qos_dscp_lab`, `voip_rtp_lab`, `fragmentation_lab`).
+      - **Zero Vendor & Carrier Leakage**: Strictly avoid vendor-specific, chipmaker-specific, or carrier-specific names (e.g., no Cisco, Huawei, ZTE, Juniper, Nokia, MikroTik, Broadcom, Qualcomm, MediaTek, Realtek, LG U+, VNPT, Viettel, FPT, etc.) in project names, code, variables, comments, or documentation. Always use generic networking terms: `DUT` (Device Under Test), `Gateway`, `CPE`, `Carrier Edge`, `Router`, `Client`, `Server`.
+      - **Zero Proprietary Requirement / Test Case Codes**: Do NOT embed customer requirement numbers, RFP/SRS clause IDs, or test case codes in directory or file names (e.g., NO `tc01_lab`, `req_4_2_1_lab`, `tc_lguplus_01`). All test suites and lab folders must be organized solely by standard RFC/IEEE protocol capabilities.
+      - **Naming Examples Matrix**:
+        | Forbidden Project Name | Approved Project Name | Rationale |
+        | :--- | :--- | :--- |
+        | `lguplus_cisco_nat_test_lab` | `nat_lab` | Zero vendor leakage; concise & RFC 3022 standard. |
+        | `tc05_out_of_order_reassembly_lab` | `fragmentation_lab` | Zero requirement ID leakage; generic RFC 791/815 protocol term. |
+        | `carrier_grade_ipv6_dual_stack_transition_mechanism_test_lab` | `ipv6_gateway_lab` | Concise (2 words) while fully expressive. |
+        | `req_4_2_1_dscp46_qos_delay_lab` | `qos_dscp_lab` | Zero RFP requirement code; generic RFC 2474 DiffServ term. |
+        | `huawei_tr069_cwmp_integration_lab` | `tr069_mgmt_lab` | Zero vendor leakage; generic BBF TR-069 standard. |
     - **Clean Protocol Abstraction & Config-Driven Customization**: Any specific value requested by a customer (e.g., specific blacklisted ports, specific MAC addresses, custom timeouts, DSCP values) must be expressed as generic configuration keys in `config.env` (e.g., `NAT_BLOCKED_PORT_LIST`, `PRIORITY_DSCP_VALUE`, `PASSTHROUGH_CLIENT_MAC`) rather than hardcoding proprietary constants.
 
 13. **Mandatory Upstream WAN Dual-Stack & Comprehensive DHCPv6 Operational Modes**:
