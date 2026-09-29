@@ -57,11 +57,22 @@ run_phase_discovery() {
 
 run_phase_traffic() {
     log_step "[PHASE 2] Data Plane Forwarding Test"
-    log_info "Testing connectivity from LAN client to WAN server..."
+    log_info "Testing IPv4 connectivity from LAN client to WAN server..."
     if is_ip_reachable "${WAN_SERVER_IP:-10.10.0.10}" 2 "${LAN_NS:-ns-lan}"; then
-        log_success "WAN reachability confirmed through DUT!"
+        log_success "WAN IPv4 reachability confirmed through DUT!"
     else
-        log_warn "Ping to WAN server failed or was dropped."
+        log_warn "Ping to WAN IPv4 server failed or was dropped."
+    fi
+
+    local wan_v6_target="${WAN_IPV6_DNS:-${WAN_SERVER_IP6:-2001:db8:10::1}}"
+    if [[ "${IP_VERSION:-dual}" == "dual" || "${IP_VERSION:-dual}" == "6" ]]; then
+        log_info "Testing IPv6 connectivity from LAN client to WAN server..."
+        if exec_in_ns "${LAN_NS:-ns-lan}" ping -6 -c 1 -W 2 "${wan_v6_target}" >/dev/null 2>&1 || \
+           exec_in_ns "${LAN_NS:-ns-lan}" ping6 -c 1 -W 2 "${wan_v6_target}" >/dev/null 2>&1; then
+            log_success "WAN IPv6 reachability confirmed through DUT!"
+        else
+            log_warn "Ping to WAN IPv6 gateway (${wan_v6_target}) failed or was dropped."
+        fi
     fi
 }
 

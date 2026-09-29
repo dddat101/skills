@@ -88,6 +88,13 @@ setup_virtual_dut() {
     ip netns exec "${ns_dut}" iptables -t nat -F 2>/dev/null || true
     ip netns exec "${ns_dut}" iptables -t nat -A POSTROUTING -o eth-wan -j MASQUERADE 2>/dev/null || true
     ip -n "${ns_dut}" route replace default via "${WAN_SERVER_IP:-10.10.0.10}" dev eth-wan 2>/dev/null || true
+
+    # Dual-stack IPv6 routing in simulated DUT
+    ip netns exec "${ns_dut}" sysctl -q -w net.ipv6.conf.all.forwarding=1 2>/dev/null || true
+    local dut_wan_ip6="${DUT_WAN_IPV6:-2001:db8:10::2/64}"
+    ip -n "${ns_dut}" -6 addr add "${dut_wan_ip6}" dev eth-wan nodad 2>/dev/null || true
+    local wan_gw6="${WAN_IPV6_DNS:-2001:db8:10::1}"
+    ip -n "${ns_dut}" -6 route replace default via "${wan_gw6}" dev eth-wan 2>/dev/null || true
 }
 
 main() {
@@ -152,7 +159,7 @@ main() {
 
     # 3. Upstream WAN Services (Kea Triad Standard: kea-dhcp4 + kea-dhcp6 + radvd)
     if [[ "${ENABLE_WAN_DHCP:-0}" == "1" ]] && [[ "${role}" == "single" || "${role}" == "wan" ]]; then
-        wan_dhcp_server start "${IP_VERSION:-4}" "${WAN_NS:-ns-wan}" "eth-wan"
+        wan_dhcp_server start "${IP_VERSION:-dual}" "${WAN_NS:-ns-wan}" "eth-wan"
     fi
 
     # 4. Save runtime topology state

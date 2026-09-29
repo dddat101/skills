@@ -10,7 +10,7 @@ A production framework for building automated, reproducible, evidence-based Netw
 
 ---
 
-## 1. The 12 Golden Principles
+## 1. The 13 Golden Principles
 
 | # | Principle | Enforcement |
 | :- | :--- | :--- |
@@ -26,6 +26,7 @@ A production framework for building automated, reproducible, evidence-based Netw
 | 10 | **Reliable Process Lifecycle** | Supervise via `.pid` files, detect stale PIDs (`kill -0`), escalate stop: `SIGINT` $\rightarrow$ `SIGTERM` $\rightarrow$ `SIGKILL`. |
 | 11 | **Canonical CLI Standards** | 100% of scripts support `-h`/`--help` with exit code `0` and 6-section `usage()` structure. |
 | 12 | **Generic Protocol Abstraction & Zero-Vendor Leakage** | Strictly generic protocol design. Never embed vendor names, customer test case codes, or proprietary requirement text. Standard RFC/IEEE terminology only. |
+| 13 | **Mandatory WAN Dual-Stack & Full DHCPv6 Modes** | WAN always provisions concurrent DHCPv4 & DHCPv6 (`IP_VERSION="dual"`). Supports dual-stack, SLAAC, stateless, stateful, and IA_PD. |
 
 For a complete breakdown of each principle, see [references/principles_and_architecture.md](references/principles_and_architecture.md).
 
@@ -146,11 +147,20 @@ Detailed guide: [references/pcap_verification_and_evidence.md](references/pcap_v
    - `CAPTURE_FILTER="(udp port 67 or udp port 68) or arp"`
 7. **Strict Mode Array Invocations**:
    - Under `IFS=$'\n\t'`, run multi-word commands as arrays: `CMD=("docker" "compose"); "${CMD[@]}" up`.
-8. **The Upstream WAN Server Standard (The Kea Triad: `kea-dhcp4` + `kea-dhcp6` + `radvd`)**:
-   - **Primary Standard**: Mandate the **Kea Triad (`kea-dhcp4` + `kea-dhcp6` + `radvd`)** for Upstream WAN services in router, gateway (DUT), and carrier-grade dual-stack test environments.
+8. **The Upstream WAN Mandatory Dual-Stack Standard (The Kea Triad: `kea-dhcp4` + `kea-dhcp6` + `radvd`)**:
+   - **Mandatory Concurrent Dual-Stack**: WAN MUST always provision both DHCPv4 and DHCPv6 concurrently by default (`IP_VERSION="dual"`). Upstream WAN is never assumed to be IPv4-only.
+   - **Comprehensive DHCPv6 & IPv6 Modes Support**: Upstream WAN services MUST support all standard RFC operational modes via `WAN_IPV6_MODE`:
+     - `dual-stack`: (Default Standard) Concurrent DHCPv4 + Stateful DHCPv6 (IA_NA + IA_PD) + SLAAC (`AdvManagedFlag on`, `AdvOtherConfigFlag on`, `AdvAutonomous on`).
+     - `slaac`: Pure Stateless Address Autoconfiguration (RFC 4862) with RDNSS (RFC 8106), `radvd` with `AdvManagedFlag off`, `AdvOtherConfigFlag off`, `AdvAutonomous on`.
+     - `stateless`: SLAAC addressing + DHCPv6 Information-Request for DNS/NTP/AFTR options (RFC 8415 / RFC 4861) with `AdvManagedFlag off`, `AdvOtherConfigFlag on`, `AdvAutonomous on`.
+     - `stateful`: Stateful DHCPv6 address only (RFC 8415 IA_NA) with `AdvManagedFlag on`, `AdvOtherConfigFlag on`, `AdvAutonomous off`.
+     - `stateful-pd`: Stateful DHCPv6 address (IA_NA) + Prefix Delegation (IA_PD RFC 3633 / RFC 8415) for CPE router WAN/LAN carving.
+     - `pd-only`: SLAAC addressing on WAN interface + Prefix Delegation (IA_PD) for downstream networks.
+     - `ds-lite`: Dual-Stack Lite (RFC 6333) with DHCPv6 Option 64 (AFTR FQDN).
+   - **Primary Daemon Standard**: Mandate the **Kea Triad (`kea-dhcp4` + `kea-dhcp6` + `radvd`)** for Upstream WAN services in router, gateway (DUT), and carrier-grade dual-stack test environments.
      - `kea-dhcp4`: Carrier-grade DHCPv4 server managing WAN IP pools, subnet masks, default gateways, and DNS servers.
      - `kea-dhcp6`: Carrier-grade DHCPv6 server supporting IA_NA (WAN IPv6 address allocation), IA_PD (Prefix Delegation pools per RFC 3633 / RFC 8415 for delegating prefixes such as `/56` or `/60` to CPE routers/DUT), Rapid Commit, and AFTR (DS-Lite RFC 6333 Option 64).
-     - `radvd`: Autonomous Router Advertisement daemon providing granular RFC 4861 / RFC 8106 control (`AdvManagedFlag on`, `AdvOtherConfigFlag on`, `AdvAutonomous on/off`, configurable min/max RA intervals).
+     - `radvd`: Autonomous Router Advertisement daemon providing granular RFC 4861 / RFC 8106 control (`AdvManagedFlag`, `AdvOtherConfigFlag`, `AdvAutonomous`, configurable min/max RA intervals).
    - **Automated Fallback**: Provide automated fallback to `dnsmasq` when Kea is not installed or encounters socket binding errors, ensuring continuous lab availability and lightweight host-only testing.
    - **Kea 3.0+ Mandatory Safeguards**:
      - *Log Path Sandbox Trap*: In Kea 3.0+, configuring non-standard output file paths fails with `COMMAND_PROCESS_ERROR2: invalid path in output, supported path is '/var/log/kea'`. Always configure `"output": "stdout"` in Kea json logger configs so the launcher safely redirects output to `${LOG_DIR}/kea-dhcp*.log`.

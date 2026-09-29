@@ -83,7 +83,7 @@ ip netns exec "${ns}" udhcpc \
 
 Commercial CPE routers, home gateways, and carrier devices under test (DUT) require complete upstream WAN services to acquire public/WAN IP addressing, default routes, DNS resolvers, and delegated IPv6 prefixes.
 
-The framework mandates the **Kea Triad (`kea-dhcp4` + `kea-dhcp6` + `radvd`)** as the **Primary Standard Architecture** for carrier, gateway, and dual-stack test environments, while maintaining **`dnsmasq` as an automated lightweight fallback**.
+The framework mandates **Concurrent Dual-Stack (DHCPv4 + DHCPv6)** as the default WAN architecture (`IP_VERSION="dual"`), powered by the **Kea Triad (`kea-dhcp4` + `kea-dhcp6` + `radvd`)** as the **Primary Standard Architecture**, while maintaining **`dnsmasq` as an automated lightweight fallback**.
 
 ```mermaid
 flowchart TD
@@ -91,14 +91,30 @@ flowchart TD
     
     ARCH --> K4["kea-dhcp4<br>• Carrier-grade DHCPv4 Server<br>• Pools, Routers (Opt 3), DNS (Opt 6)"]
     ARCH --> K6["kea-dhcp6<br>• Carrier-grade DHCPv6 Server<br>• IA_NA WAN Address Allocation<br>• IA_PD Prefix Delegation (RFC 3633/8415)<br>• DS-Lite AFTR (Option 64)"]
-    ARCH --> RAD["radvd<br>• Router Advertisement Daemon<br>• M=1 (Managed) & O=1 (OtherConfig)<br>• Autonomous flag control & RDNSS"]
+    ARCH --> RAD["radvd<br>• Router Advertisement Daemon<br>• Dynamic M, O, A flag control<br>• SLAAC & RFC 8106 RDNSS"]
     
-    ARCH -.->|"Fallback if Kea is missing or sockets fail"| FALLBACK["Automated Fallback: dnsmasq<br>• Single lightweight daemon (1 PID)<br>• Ideal for host-only testbeds"]
+    ARCH -.->|"Fallback if Kea is missing or sockets fail"| FALLBACK["Automated Fallback: dnsmasq<br>• Single lightweight daemon (1 PID)<br>• Dynamically configured for all IPv6 modes"]
 ```
 
 ---
 
-### 3.1. Why the Kea Triad is Mandated for Router & Gateway Testing
+### 3.1. Supported WAN DHCPv6 & IPv6 Operational Modes
+
+The framework supports 7 standard IPv6 WAN deployment modes via `WAN_IPV6_MODE` in `config.env`:
+
+| Mode (`WAN_IPV6_MODE`) | Standard RFCs | `AdvManagedFlag` (M) | `AdvOtherConfigFlag` (O) | `AdvAutonomous` (A) | Daemons Active | Description |
+| :--- | :--- | :---: | :---: | :---: | :--- | :--- |
+| `dual-stack` *(Default)* | RFC 8415, RFC 3633, RFC 4861 | **on** | **on** | **on** | `kea-dhcp4` + `kea-dhcp6` + `radvd` | Full concurrent dual-stack: DHCPv4 + Stateful DHCPv6 (IA_NA + IA_PD) + SLAAC fallback. |
+| `slaac` | RFC 4862, RFC 8106 | **off** | **off** | **on** | `kea-dhcp4` + `radvd` | Pure Stateless Autoconfiguration: Host generates address from RA prefix; DNS via RDNSS; no DHCPv6 daemon. |
+| `stateless` | RFC 8415, RFC 4861, RFC 4862 | **off** | **on** | **on** | `kea-dhcp4` + `kea-dhcp6` + `radvd` | SLAAC address autoconfiguration + DHCPv6 Information-Request for DNS/NTP/AFTR options. |
+| `stateful` | RFC 8415 | **on** | **on** | **off** | `kea-dhcp4` + `kea-dhcp6` + `radvd` | Stateful address allocation only via DHCPv6 IA_NA address pool; SLAAC address formation disabled. |
+| `stateful-pd` | RFC 3633, RFC 8415 | **on** | **on** | **off** | `kea-dhcp4` + `kea-dhcp6` + `radvd` | Stateful WAN IPv6 address (IA_NA) + Prefix Delegation pool (IA_PD) for downstream LAN router carving. |
+| `pd-only` | RFC 3633, RFC 8415 | **off** | **on** | **on** | `kea-dhcp4` + `kea-dhcp6` + `radvd` | SLAAC on WAN interface + DHCPv6 Prefix Delegation (IA_PD) for CPE router downstream subnets. |
+| `ds-lite` | RFC 6333, RFC 8415 | **on** | **on** | **off** | `kea-dhcp6` + `radvd` | IPv6-only transport carrying IPv4-in-IPv6 tunnels; signals AFTR FQDN via DHCPv6 Option 64. |
+
+---
+
+### 3.2. Why the Kea Triad is Mandated for Router & Gateway Testing
 
 1. **DHCPv6 Prefix Delegation (IA_PD - RFC 3633 / RFC 8415)**:
    - A CPE router requires an upstream delegated prefix (e.g. `/56` or `/60`) on its WAN port, which it then carves into `/64` subnets to advertise to downstream LAN clients, IPTV set-top boxes, and Wi-Fi networks.
@@ -107,7 +123,7 @@ flowchart TD
 2. **Deterministic Dual-Stack Isolation**:
    - `kea-dhcp4` handles IPv4 leasing independently from IPv6, avoiding lease file race conditions and cross-family lockups.
 3. **Autonomous Router Advertisements (`radvd`)**:
-   - `radvd` provides explicit, fine-grained control over RFC 4861 / RFC 8106 flags (`AdvManagedFlag on`, `AdvOtherConfigFlag on`, `AdvAutonomous on/off`) and fast convergence intervals (`MinRtrAdvInterval 3s`, `MaxRtrAdvInterval 10s`), triggering DUT DHCPv6 requests without delay.
+   - `radvd` provides explicit, fine-grained control over RFC 4861 / RFC 8106 flags (`AdvManagedFlag`, `AdvOtherConfigFlag`, `AdvAutonomous`) and fast convergence intervals (`MinRtrAdvInterval 3s`, `MaxRtrAdvInterval 10s`), triggering DUT DHCPv6 requests without delay.
 
 ---
 
@@ -260,13 +276,13 @@ interface @DUT_IF@
     AdvDefaultLifetime @RA_LIFETIME_SEC@;
     MinRtrAdvInterval @RA_MIN_INTERVAL_SEC@;
     MaxRtrAdvInterval @RA_MAX_INTERVAL_SEC@;
-    AdvManagedFlag on;
-    AdvOtherConfigFlag on;
+    AdvManagedFlag @RA_MANAGED_FLAG@;
+    AdvOtherConfigFlag @RA_OTHER_CONFIG_FLAG@;
 
     prefix @WAN_IPV6_PREFIX@
     {
         AdvOnLink on;
-        AdvAutonomous on;
+        AdvAutonomous @RA_AUTONOMOUS_FLAG@;
     };
 
     RDNSS @WAN_IPV6_RDNSS@

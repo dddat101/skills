@@ -341,6 +341,52 @@ render_wan_template() {
         v6_radvd_dns="${WAN_IPV6_DNS} ${WAN_IPV6_DNS2}"
     fi
 
+    local v6_mode="${WAN_IPV6_MODE:-dual-stack}"
+    local ra_managed="${RA_MANAGED_FLAG:-}"
+    local ra_other="${RA_OTHER_CONFIG_FLAG:-}"
+    local ra_autonomous="${RA_AUTONOMOUS_FLAG:-}"
+
+    # Auto-derive RA flags if not explicitly set
+    if [[ -z "${ra_managed}" || -z "${ra_other}" || -z "${ra_autonomous}" ]]; then
+        case "${v6_mode}" in
+            slaac)
+                [[ -z "${ra_managed}" ]] && ra_managed="off"
+                [[ -z "${ra_other}" ]] && ra_other="off"
+                [[ -z "${ra_autonomous}" ]] && ra_autonomous="on"
+                ;;
+            stateless)
+                [[ -z "${ra_managed}" ]] && ra_managed="off"
+                [[ -z "${ra_other}" ]] && ra_other="on"
+                [[ -z "${ra_autonomous}" ]] && ra_autonomous="on"
+                ;;
+            stateful)
+                [[ -z "${ra_managed}" ]] && ra_managed="on"
+                [[ -z "${ra_other}" ]] && ra_other="on"
+                [[ -z "${ra_autonomous}" ]] && ra_autonomous="off"
+                ;;
+            stateful-pd)
+                [[ -z "${ra_managed}" ]] && ra_managed="on"
+                [[ -z "${ra_other}" ]] && ra_other="on"
+                [[ -z "${ra_autonomous}" ]] && ra_autonomous="off"
+                ;;
+            pd-only)
+                [[ -z "${ra_managed}" ]] && ra_managed="off"
+                [[ -z "${ra_other}" ]] && ra_other="on"
+                [[ -z "${ra_autonomous}" ]] && ra_autonomous="on"
+                ;;
+            ds-lite)
+                [[ -z "${ra_managed}" ]] && ra_managed="on"
+                [[ -z "${ra_other}" ]] && ra_other="on"
+                [[ -z "${ra_autonomous}" ]] && ra_autonomous="off"
+                ;;
+            dual-stack|*)
+                [[ -z "${ra_managed}" ]] && ra_managed="on"
+                [[ -z "${ra_other}" ]] && ra_other="on"
+                [[ -z "${ra_autonomous}" ]] && ra_autonomous="on"
+                ;;
+        esac
+    fi
+
     sed \
         -e "s|@DUT_IF@|${iface}|g" \
         -e "s|@WAN_IPV4_SUBNET@|${WAN_IPV4_SUBNET:-10.10.0.0/24}|g" \
@@ -358,6 +404,9 @@ render_wan_template() {
         -e "s|@PD_DELEGATED_LEN@|${PD_DELEGATED_LEN:-60}|g" \
         -e "s|@WAN_IPV6_DNS@|${v6_dns_list}|g" \
         -e "s|@WAN_IPV6_RDNSS@|${v6_radvd_dns}|g" \
+        -e "s|@RA_MANAGED_FLAG@|${ra_managed}|g" \
+        -e "s|@RA_OTHER_CONFIG_FLAG@|${ra_other}|g" \
+        -e "s|@RA_AUTONOMOUS_FLAG@|${ra_autonomous}|g" \
         -e "s|@AFTR_NAME@|${AFTR_NAME:-aftr.example.com}|g" \
         -e "s|@DHCP_VALID_LIFETIME_SEC@|${DHCP_VALID_LIFETIME_SEC:-43200}|g" \
         -e "s|@DHCP_RENEW_TIMER_SEC@|${DHCP_RENEW_TIMER_SEC:-21600}|g" \
@@ -400,7 +449,7 @@ namespace_ipv6() {
 
 wan_dhcp_server() {
     local action="$1"
-    local ip_version="${2:-${IP_VERSION:-4}}"
+    local ip_version="${2:-${IP_VERSION:-dual}}"
     local wan_ns="${3:-${WAN_NS:-ns-wan}}"
     local wan_if="${4:-eth0}"
     local pidfile_dnsmasq="${STATE_DIR}/dnsmasq-wan.pid"
@@ -432,15 +481,19 @@ wan_dhcp_server() {
             local wan_v6_gw="${WAN_IPV6_DNS:-${WAN_NS_GW6:-${WAN_NS_IP6%/*}}}"
             local wan_v6_dns="${WAN_IPV6_DNS:-${wan_v6_gw}}"
             local wan_v6_dns2="${WAN_IPV6_DNS2:-}"
+            local v6_mode="${WAN_IPV6_MODE:-dual-stack}"
 
             local is_v6=0
             local is_v4=0
             if [[ "${ip_version}" == "dual" || "${ip_version}" == "dual-stack" || "${ip_version}" == "ds" ]]; then
                 is_v6=1
                 is_v4=1
-            elif [[ "${ip_version}" == "6" ]]; then
+            elif [[ "${ip_version}" == "6" || "${ip_version}" == "v6" ]]; then
                 is_v6=1
+            elif [[ "${ip_version}" == "4" || "${ip_version}" == "v4" ]]; then
+                is_v4=1
             else
+                is_v6=1
                 is_v4=1
             fi
 
@@ -448,7 +501,9 @@ wan_dhcp_server() {
             local use_kea=0
             if (( is_v6 == 1 )); then
                 if [[ "${backend}" == "kea" || "${backend}" == "auto" ]]; then
-                    if command -v kea-dhcp6 >/dev/null 2>&1 && command -v radvd >/dev/null 2>&1; then
+                    if [[ "${v6_mode}" == "slaac" ]] && command -v radvd >/dev/null 2>&1; then
+                        use_kea=1
+                    elif command -v kea-dhcp6 >/dev/null 2>&1 && command -v radvd >/dev/null 2>&1; then
                         use_kea=1
                     fi
                 fi
@@ -466,6 +521,12 @@ wan_dhcp_server() {
                     ip -n "${wan_ns}" -6 addr add "fe80::254/64" dev "${wan_if}" nodad 2>/dev/null || true
                 fi
 
+                # Ensure static global WAN IPv6 address exists
+                local wan_v6_addr="${WAN_IPV6_CIDR:-2001:db8:10::1/64}"
+                if ! ip netns exec "${wan_ns}" ip -6 -o addr show dev "${wan_if}" scope global 2>/dev/null | grep -q 'inet6 '; then
+                    ip -n "${wan_ns}" -6 addr add "${wan_v6_addr}" dev "${wan_if}" nodad 2>/dev/null || true
+                fi
+
                 # Enable IPv6 forwarding in wan_ns
                 ip netns exec "${wan_ns}" sysctl -q -w net.ipv6.conf.all.forwarding=1 2>/dev/null || true
                 ip netns exec "${wan_ns}" sysctl -q -w net.ipv6.conf.default.forwarding=1 2>/dev/null || true
@@ -475,24 +536,26 @@ wan_dhcp_server() {
                 render_wan_template "${radvd_tmpl}" "${radvd_conf}" "${wan_if}"
                 chmod 0644 "${radvd_conf}" 2>/dev/null || true
 
-                # Start radvd (M=1, O=1)
+                # Start radvd
                 ip netns exec "${wan_ns}" radvd -C "${radvd_conf}" -p "${pidfile_radvd}" -m logfile -l "${LOG_DIR}/radvd.log"
-                log_info "radvd started in ${wan_ns} (M=1, O=1) [PID $(cat "${pidfile_radvd}" 2>/dev/null || echo '?')]"
+                log_info "radvd started in ${wan_ns} [Mode: ${v6_mode}] [PID $(cat "${pidfile_radvd}" 2>/dev/null || echo '?')]"
 
-                # Start Kea DHCPv6 (IA_NA + IA_PD)
-                nohup ip netns exec "${wan_ns}" \
-                    env KEA_PIDFILE_DIR="/run/kea" KEA_LOCKFILE_DIR="/run/lock/kea" \
-                    kea-dhcp6 -c "${kea_conf}" > "${LOG_DIR}/kea-dhcp6.log" 2>&1 &
-                printf '%s\n' "$!" > "${pidfile_kea}"
-                sleep 0.5
+                # In pure SLAAC mode, Kea DHCPv6 daemon is not required
+                if [[ "${v6_mode}" != "slaac" ]]; then
+                    nohup ip netns exec "${wan_ns}" \
+                        env KEA_PIDFILE_DIR="/run/kea" KEA_LOCKFILE_DIR="/run/lock/kea" \
+                        kea-dhcp6 -c "${kea_conf}" > "${LOG_DIR}/kea-dhcp6.log" 2>&1 &
+                    printf '%s\n' "$!" > "${pidfile_kea}"
+                    sleep 0.5
 
-                if is_pidfile_running "${pidfile_kea}" && ! grep -q "DHCPSRV_NO_SOCKETS_OPEN" "${LOG_DIR}/kea-dhcp6.log" 2>/dev/null; then
-                    log_info "WAN DHCPv6 Server (kea-dhcp6) started in ${wan_ns} (IA_NA + IA_PD: ${PD_PREFIX:-2001:db8:100::}/${PD_PREFIX_LEN:-56} -> /${PD_DELEGATED_LEN:-60}) [PID $(cat "${pidfile_kea}")]"
-                else
-                    log_warn "kea-dhcp6 failed to start or bind sockets. Falling back to dnsmasq..."
-                    stop_pidfile "${pidfile_kea}"
-                    stop_pidfile "${pidfile_radvd}"
-                    use_kea=0
+                    if is_pidfile_running "${pidfile_kea}" && ! grep -q "DHCPSRV_NO_SOCKETS_OPEN" "${LOG_DIR}/kea-dhcp6.log" 2>/dev/null; then
+                        log_info "WAN DHCPv6 Server (kea-dhcp6) started in ${wan_ns} [Mode: ${v6_mode}] (IA_NA + IA_PD: ${PD_PREFIX:-2001:db8:100::}/${PD_PREFIX_LEN:-56} -> /${PD_DELEGATED_LEN:-60}) [PID $(cat "${pidfile_kea}")]"
+                    else
+                        log_warn "kea-dhcp6 failed to start or bind sockets. Falling back to dnsmasq..."
+                        stop_pidfile "${pidfile_kea}"
+                        stop_pidfile "${pidfile_radvd}"
+                        use_kea=0
+                    fi
                 fi
             fi
 
@@ -562,8 +625,23 @@ no-hosts
 bind-interfaces
 interface=${wan_if}
 enable-ra
-dhcp-range=${wan_v6_start},${wan_v6_end},slaac,ra-stateless,64,${wan_v4_lease}
-dhcp-range=${wan_v6_start},${wan_v6_end},64,${wan_v4_lease}
+EOF
+                case "${v6_mode}" in
+                    slaac)
+                        printf 'dhcp-range=%s,%s,slaac,64,%s\n' "${wan_v6_start}" "${wan_v6_end}" "${wan_v4_lease}" >>"${conf_v6}"
+                        ;;
+                    stateless)
+                        printf 'dhcp-range=%s,%s,slaac,ra-stateless,64,%s\n' "${wan_v6_start}" "${wan_v6_end}" "${wan_v4_lease}" >>"${conf_v6}"
+                        ;;
+                    stateful)
+                        printf 'dhcp-range=%s,%s,64,%s\n' "${wan_v6_start}" "${wan_v6_end}" "${wan_v4_lease}" >>"${conf_v6}"
+                        ;;
+                    stateful-pd|dual-stack|*)
+                        printf 'dhcp-range=%s,%s,slaac,ra-stateless,64,%s\n' "${wan_v6_start}" "${wan_v6_end}" "${wan_v4_lease}" >>"${conf_v6}"
+                        printf 'dhcp-range=%s,%s,64,%s\n' "${wan_v6_start}" "${wan_v6_end}" "${wan_v4_lease}" >>"${conf_v6}"
+                        ;;
+                esac
+                cat >>"${conf_v6}" <<EOF
 dhcp-option=option6:dns-server,[${wan_v6_dns}]
 dhcp-authoritative
 dhcp-leasefile=${leasefile_dnsmasq}
@@ -577,7 +655,7 @@ EOF
                     printf 'dhcp-host=%s,[%s]\n' "${DUT_WAN_MAC}" "${DUT_WAN_IP6:-2001:db8:10::1}" >>"${conf_v6}"
                 fi
                 ip netns exec "${wan_ns}" dnsmasq --conf-file="${conf_v6}" --pid-file="${pidfile_dnsmasq}"
-                log_info "WAN DHCPv6 Server (dnsmasq fallback) started in ${wan_ns} [PID $(cat "${pidfile_dnsmasq}" 2>/dev/null || echo '?')]"
+                log_info "WAN DHCPv6 Server (dnsmasq fallback) started in ${wan_ns} [Mode: ${v6_mode}] [PID $(cat "${pidfile_dnsmasq}" 2>/dev/null || echo '?')]"
             fi
             ;;
 
@@ -603,12 +681,13 @@ EOF
                 printf 'WAN DHCPv4 Server (kea-dhcp4): RUNNING (PID %s in %s)\n' "$(cat "${pidfile_kea4}")" "${wan_ns}"
                 running=1
             fi
+            local v6_mode_display="${WAN_IPV6_MODE:-dual-stack}"
             if is_pidfile_running "${pidfile_kea}"; then
-                printf 'WAN DHCPv6 Server (kea-dhcp6): RUNNING (PID %s in %s, IA_NA + IA_PD)\n' "$(cat "${pidfile_kea}")" "${wan_ns}"
+                printf 'WAN DHCPv6 Server (kea-dhcp6): RUNNING (PID %s in %s, Mode: %s, IA_NA + IA_PD)\n' "$(cat "${pidfile_kea}")" "${wan_ns}" "${v6_mode_display}"
                 running=1
             fi
             if is_pidfile_running "${pidfile_radvd}"; then
-                printf 'WAN Router Advertisements (radvd): RUNNING (PID %s in %s)\n' "$(cat "${pidfile_radvd}")" "${wan_ns}"
+                printf 'WAN Router Advertisements (radvd): RUNNING (PID %s in %s, Mode: %s)\n' "$(cat "${pidfile_radvd}")" "${wan_ns}" "${v6_mode_display}"
                 running=1
             fi
             if is_pidfile_running "${pidfile_dnsmasq_v4}"; then

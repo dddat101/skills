@@ -73,8 +73,10 @@ main() {
         for ns in "${WAN_NS:-ns-wan}" "${LAN_NS:-ns-lan}" "${DUT_NS:-ns-dut}"; do
             if ns_exists "${ns}"; then
                 printf 'Namespace: \e[1;36m%s\e[0m\n' "${ns}"
-                ip netns exec "${ns}" ip -br -4 addr show 2>/dev/null | awk '{printf "  %-16s %s\n", $1, $3}' || true
-                ip netns exec "${ns}" ip route show 2>/dev/null | awk '{printf "    route: %s\n", $0}' || true
+                ip netns exec "${ns}" ip -br -4 addr show 2>/dev/null | awk '{printf "  [IPv4] %-12s %s\n", $1, $3}' || true
+                ip netns exec "${ns}" ip -br -6 addr show 2>/dev/null | awk '{printf "  [IPv6] %-12s %s\n", $1, $3}' || true
+                ip netns exec "${ns}" ip -4 route show 2>/dev/null | awk '{printf "    v4 route: %s\n", $0}' || true
+                ip netns exec "${ns}" ip -6 route show 2>/dev/null | awk '{printf "    v6 route: %s\n", $0}' || true
             fi
         done
     else

@@ -64,7 +64,18 @@ main() {
         fi
     done
 
-    # 2. Host Network Safety Assertions
+    # 2. WAN DHCP & Dual-Stack Services
+    print_section "WAN DHCP & DUAL-STACK DAEMONS"
+    local srv
+    for srv in kea-dhcp4 kea-dhcp6 radvd dnsmasq; do
+        if check_command "${srv}"; then
+            check_item "Server: ${srv}" "PASS" "$(command -v "${srv}")"
+        else
+            check_item "Server: ${srv}" "WARN" "Not installed (Fallback logic applies)"
+        fi
+    done
+
+    # 3. Host Network Safety Assertions
     print_section "HOST NETWORK SAFETY"
     local default_if
     default_if="$((ip route show default 2>/dev/null || true) | awk '/dev/ {print $5}' | head -n1 || echo "")"
@@ -89,7 +100,7 @@ main() {
         fi
     done
 
-    # 3. Kernel Modules & Features
+    # 4. Kernel Modules & Features
     print_section "KERNEL CAPABILITIES"
     if [[ -d /sys/class/net ]]; then
         check_item "Linux Network Stack" "PASS" "sysfs net available"
@@ -98,6 +109,11 @@ main() {
         local fwd
         fwd="$(cat /proc/sys/net/ipv4/ip_forward)"
         check_item "Host IPv4 Forwarding" "PASS" "State: ${fwd}"
+    fi
+    if [[ -d /proc/sys/net/ipv6 ]]; then
+        check_item "Host IPv6 Stack" "PASS" "IPv6 enabled in kernel"
+    else
+        check_item "Host IPv6 Stack" "WARN" "IPv6 stack disabled or unavailable"
     fi
 
     # 4. Runtime Directories

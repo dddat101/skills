@@ -117,11 +117,20 @@ main() {
 
         # Rule: Never quote IP address in tshark -Y
         local arp_or_ip
-        arp_or_ip="$( (tshark -r "${pcap_file}" -Y 'arp or icmp or ip' 2>/dev/null || true) | wc -l || echo 0 )"
+        arp_or_ip="$( (tshark -r "${pcap_file}" -Y 'arp or icmp or icmpv6 or ip or ipv6' 2>/dev/null || true) | wc -l || echo 0 )"
         if (( arp_or_ip > 0 )); then
-            check_test "TC_WIRE_02" "Protocol Exchange Activity" "PASS" "Found ${arp_or_ip} valid network frames."
+            check_test "TC_WIRE_02" "Protocol Exchange Activity" "PASS" "Found ${arp_or_ip} valid network frames (IPv4/IPv6)."
         else
-            check_test "TC_WIRE_02" "Protocol Exchange Activity" "WARN" "No ARP/ICMP/IP frames detected."
+            check_test "TC_WIRE_02" "Protocol Exchange Activity" "WARN" "No ARP/ICMP/IPv4/IPv6 frames detected."
+        fi
+
+        # Dual-Stack Discovery & Addressing Activity (DHCPv4, DHCPv6, ICMPv6 RA/RS)
+        local dhcp_or_ra
+        dhcp_or_ra="$( (tshark -r "${pcap_file}" -Y 'bootp or dhcp or dhcpv6 or (icmpv6.type == 133 or icmpv6.type == 134)' 2>/dev/null || true) | wc -l || echo 0 )"
+        if (( dhcp_or_ra > 0 )); then
+            check_test "TC_WIRE_03" "Dual-Stack Addressing Activity" "PASS" "Found ${dhcp_or_ra} DHCPv4/DHCPv6/ICMPv6-RA frames."
+        else
+            check_test "TC_WIRE_03" "Dual-Stack Addressing Activity" "WARN" "No DHCPv4/DHCPv6 or ICMPv6 RA frames observed."
         fi
     else
         check_test "TC_WIRE_01" "Traffic Capture Integrity" "WARN" "PCAP file not available for deep inspection."
