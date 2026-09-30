@@ -469,3 +469,30 @@ scripts/
 4. **Backward Compatibility**:
    - `common.sh` retains a lightweight delegation wrapper `wan_dhcp_server()` forwarding arguments directly to `"${PROJECT_ROOT}/scripts/wan_server.sh start"`, ensuring zero disruption for legacy scripts.
 
+### 4.3. End-to-End Dual-Stack Lifecycle in Physical Hardware Mode (`--single`)
+
+In physical gateway benchmarking (`--single`), the lab operates as a complete carrier edge and multi-client ecosystem:
+
+```
+[Upstream WAN Server]                  [Physical Gateway DUT]                  [Downstream LAN Endpoints]
+    (ns-wan)                                (Hardware)                             (ns-pc, ns-stb, ...)
+        |                                       |                                           |
+        |--- 1. DHCPv4 Offer (203.0.113.x) ---->|                                           |
+        |--- 2. DHCPv6 IA_NA + IA_PD (/60) ---->|                                           |
+        |--- 3. Router Advertisement (RA) ----->|                                           |
+        |                                       |                                           |
+        |                           (DUT WAN Online: eth1.1)                                |
+        |                           (Activates LAN DHCP & RA)                               |
+        |                                       |                                           |
+        |                                       |<--- 4. DHCPv4 Discover (udhcpc) ----------|
+        |                                       |---- 5. DHCPv4 Ack (192.168.1.x) --------->|
+        |                                       |<--- 6. Router Solicitation (RS) ----------|
+        |                                       |---- 7. Router Advert + SLAAC (from PD) -->|
+```
+
+1. **Upstream Provisioning**: `wan_server.sh` activates `kea-dhcp4`, `kea-dhcp6`, and `radvd` on `ns-wan:eth0`.
+2. **DUT WAN Activation**: DUT WAN (`eth1.1`) acquires its public IPv4 (`203.0.113.x`), WAN IPv6 (`2001:db8:10::x`), and delegated `/60` LAN prefix via DHCPv6-PD (`IA_PD`).
+3. **DUT LAN Services**: DUT activates internal DHCPv4 server and IPv6 Router Advertisement (`radvd`/`dnsmasq`) on LAN bridge `br0`.
+4. **LAN Client Dynamic Acquisition**: In `--single` mode, `LAN_DHCP_CLIENT="1"` is active by default. `client_dhcp.sh renew all` runs inside client namespaces (`ns-pc`), automatically leasing private IPv4 addresses and acquiring global IPv6 SLAAC addresses carved from the delegated prefix.
+
+

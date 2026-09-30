@@ -146,7 +146,11 @@ renew_client() {
         ip netns exec "${ns}" pkill -TERM udhcpc 2>/dev/null || true
         ip netns exec "${ns}" pkill -TERM dhclient 2>/dev/null || true
 
-        log_info "Requesting DHCP lease on ${ns}:${iface} (Hostname: ${hostname})..."
+        # Enable IPv6 SLAAC autoconf & RA reception
+        ip netns exec "${ns}" sysctl -q -w "net.ipv6.conf.${iface}.accept_ra=2" 2>/dev/null || true
+        ip netns exec "${ns}" sysctl -q -w "net.ipv6.conf.${iface}.autoconf=1" 2>/dev/null || true
+
+        log_info "Requesting dynamic DHCP lease on ${ns}:${iface} (Hostname: ${hostname})..."
 
         local acquired=0
         if command -v udhcpc >/dev/null 2>&1; then
@@ -159,7 +163,6 @@ renew_client() {
                 -x "hostname:${hostname}" -F "${hostname}" \
                 -V "${vendor_id}" > "${logfile}" 2>&1 || true
 
-            # If background daemon desired, re-run with -b
             if [[ -f "${pidfile}" ]] && is_pidfile_running "${pidfile}"; then
                 acquired=1
             fi
@@ -175,20 +178,32 @@ renew_client() {
             fi
         fi
 
-        # Check acquired IPv4 address
-        local current_ip
+        # Trigger DHCPv6 request if dhclient available
+        if command -v dhclient >/dev/null 2>&1; then
+            local dhclient6_pid="${STATE_DIR}/dhclient6-${ns}.pid"
+            local leasefile6="${STATE_DIR}/dhclient6-${ns}.leases"
+            ip netns exec "${ns}" dhclient -6 -v -1 -lf "${leasefile6}" -pf "${dhclient6_pid}" "${iface}" >/dev/null 2>&1 || true
+        fi
+
+        # Check acquired addresses
+        local current_ip current_v6
         current_ip="$(ip netns exec "${ns}" ip -4 -o addr show dev "${iface}" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || echo "")"
+        current_v6="$(ip netns exec "${ns}" ip -6 -o addr show dev "${iface}" scope global 2>/dev/null | awk '{print $4}' | head -n1 || echo "")"
 
         if [[ -n "${current_ip}" && "${current_ip}" != "${static_ip}" ]]; then
             local current_gw
             current_gw="$(ip netns exec "${ns}" ip -4 route show default 2>/dev/null | awk '{print $3}' | head -n1 || echo "")"
-            log_success "DHCP lease acquired on ${ns}:${iface} -> IP: ${current_ip} (Gateway: ${current_gw:-none})"
+            log_success "DHCPv4 lease acquired on ${ns}:${iface} -> IP: ${current_ip} (Gateway: ${current_gw:-none})"
         elif [[ -n "${current_ip}" ]]; then
-            log_success "Interface ${ns}:${iface} configured with IP: ${current_ip}"
+            log_success "Interface ${ns}:${iface} configured with IPv4: ${current_ip}"
         else
             log_warn "DHCP discovery timed out on ${ns}:${iface}; falling back to static IP: ${static_ip}/${LAN_PREFIX:-24}..."
             ip -n "${ns}" addr add "${static_ip}/${LAN_PREFIX:-24}" dev "${iface}" 2>/dev/null || true
             ip -n "${ns}" route replace default via "${DUT_LAN_IP:-192.168.1.1}" dev "${iface}" 2>/dev/null || true
+        fi
+
+        if [[ -n "${current_v6}" ]]; then
+            log_success "IPv6 lease/SLAAC acquired on ${ns}:${iface} -> ${current_v6}"
         fi
     done
 
@@ -220,6 +235,7 @@ release_client() {
         ip netns exec "${ns}" pkill -TERM udhcpc 2>/dev/null || true
         ip netns exec "${ns}" pkill -TERM dhclient 2>/dev/null || true
         stop_pidfile "${STATE_DIR}/dhclient-${ns}.pid"
+        stop_pidfile "${STATE_DIR}/dhclient6-${ns}.pid"
 
         log_info "Released DHCP on ${ns}:${iface}"
     done
@@ -241,21 +257,22 @@ show_status() {
         "${PHONE2_NS:-ns-phone2}:VoIP Phone 2"
     )
 
-    printf '%-14s %-20s %-8s %-16s %-16s %-12s\n' "Namespace" "Role / Device" "IFace" "Current IP" "Default Gateway" "DHCP Mode"
-    printf '%s\n' "--------------------------------------------------------------------------------------------------"
+    printf '%-12s %-18s %-6s %-16s %-26s %-12s\n' "Namespace" "Role / Device" "IFace" "IPv4 Address" "IPv6 Address (SLAAC/DHCP)" "DHCP Mode"
+    printf '%s\n' "----------------------------------------------------------------------------------------------------------------------"
 
-    local entry ns desc iface cur_ip cur_gw pidfile dhcp_mode
+    local entry ns desc iface cur_ip4 cur_v6 cur_gw pidfile dhcp_mode
     for entry in "${targets[@]}"; do
         ns="${entry%%:*}"
         desc="${entry#*:}"
 
         if ! ns_exists "${ns}"; then
-            printf '%-14s %-20s %-8s %-16s %-16s %-12s\n' "${ns}" "${desc}" "-" "[NOT FOUND]" "-" "INACTIVE"
+            printf '%-12s %-18s %-6s %-16s %-26s %-12s\n' "${ns}" "${desc}" "-" "[NOT FOUND]" "-" "INACTIVE"
             continue
         fi
 
         iface="$(get_ns_interface "${ns}")"
-        cur_ip="$(ip netns exec "${ns}" ip -4 -o addr show dev "${iface}" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || echo "-")"
+        cur_ip4="$(ip netns exec "${ns}" ip -4 -o addr show dev "${iface}" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || echo "-")"
+        cur_v6="$(ip netns exec "${ns}" ip -6 -o addr show dev "${iface}" scope global 2>/dev/null | awk '{print $4}' | head -n1 || echo "-")"
         cur_gw="$(ip netns exec "${ns}" ip -4 route show default 2>/dev/null | awk '{print $3}' | head -n1 || echo "-")"
         pidfile="${STATE_DIR}/udhcpc-${ns}.pid"
 
@@ -263,13 +280,13 @@ show_status() {
             dhcp_mode="DHCP (Active)"
         elif [[ -f "${STATE_DIR}/dhclient-${ns}.pid" ]] && is_pidfile_running "${STATE_DIR}/dhclient-${ns}.pid"; then
             dhcp_mode="DHCP (Active)"
-        elif [[ -n "${cur_ip}" && "${cur_ip}" != "-" ]]; then
+        elif [[ -n "${cur_ip4}" && "${cur_ip4}" != "-" ]]; then
             dhcp_mode="STATIC"
         else
             dhcp_mode="UNCONFIGURED"
         fi
 
-        printf '%-14s %-20s %-8s %-16s %-16s %-12s\n' "${ns}" "${desc}" "${iface}" "${cur_ip}" "${cur_gw}" "${dhcp_mode}"
+        printf '%-12s %-18s %-6s %-16s %-26s %-12s\n' "${ns}" "${desc}" "${iface}" "${cur_ip4}" "${cur_v6}" "${dhcp_mode}"
     done
 }
 

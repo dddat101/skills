@@ -310,9 +310,13 @@ setup_physical_topology() {
         ip -n "${PC_NS:-ns-pc}" link set "${lan_if}" name "eth0"
     fi
     ip -n "${PC_NS:-ns-pc}" link set "eth0" up
-    ip -n "${PC_NS:-ns-pc}" addr add "${PC_IP:-192.168.1.10}/${LAN_PREFIX:-24}" dev eth0
-    ip -n "${PC_NS:-ns-pc}" route replace default via "${DUT_LAN_IP:-192.168.1.1}" dev eth0
-    log_info "Bound physical PC interface to ${PC_NS:-ns-pc} (IP: ${PC_IP:-192.168.1.10})"
+    if (( ${LAN_DHCP_CLIENT:-1} == 1 )); then
+        log_info "Bound physical PC interface to ${PC_NS:-ns-pc} (Dynamic DHCP Mode: leases from DUT)..."
+    else
+        ip -n "${PC_NS:-ns-pc}" addr add "${PC_IP:-192.168.1.10}/${LAN_PREFIX:-24}" dev eth0
+        ip -n "${PC_NS:-ns-pc}" route replace default via "${DUT_LAN_IP:-192.168.1.1}" dev eth0
+        log_info "Bound physical PC interface to ${PC_NS:-ns-pc} (Static IP: ${PC_IP:-192.168.1.10})"
+    fi
 
     # 3. Setup IPTV STB Interface (Dedicated 100M port on DUT)
     if [[ -n "${stb_if}" || -n "${trunk_if}" ]]; then
@@ -328,8 +332,13 @@ setup_physical_topology() {
             ip -n "${STB_NS:-ns-stb}" link set "${stb_if}" name "eth0"
         fi
         ip -n "${STB_NS:-ns-stb}" link set "eth0" up
-        ip -n "${STB_NS:-ns-stb}" addr add "${STB_IP:-192.168.1.20}/${LAN_PREFIX:-24}" dev eth0
-        ip -n "${STB_NS:-ns-stb}" route replace default via "${DUT_LAN_IP:-192.168.1.1}" dev eth0
+        if (( ${LAN_DHCP_CLIENT:-1} == 1 )); then
+            log_info "Bound physical STB interface to ${STB_NS:-ns-stb} (Dynamic DHCP Mode: leases from DUT)..."
+        else
+            ip -n "${STB_NS:-ns-stb}" addr add "${STB_IP:-192.168.1.20}/${LAN_PREFIX:-24}" dev eth0
+            ip -n "${STB_NS:-ns-stb}" route replace default via "${DUT_LAN_IP:-192.168.1.1}" dev eth0
+            log_info "Bound physical STB interface (${stb_if:-${trunk_if}.${VLAN_ID_STB:-20}}) to ${STB_NS:-ns-stb} (Static IP: ${STB_IP:-192.168.1.20})"
+        fi
         # Force or request 100BASE-TX full-duplex on physical adapter if supported
         ip netns exec "${STB_NS:-ns-stb}" ethtool -s eth0 speed 100 duplex full autoneg off 2>/dev/null || true
         log_info "Bound physical STB interface (${stb_if:-${trunk_if}.${VLAN_ID_STB:-20}}) to ${STB_NS:-ns-stb} (IP: ${STB_IP:-192.168.1.20})"
@@ -382,8 +391,8 @@ setup_physical_topology() {
     fi
 
     # 7. Start LAN client DHCP leasing from DUT if requested
-    if (( ${LAN_DHCP_CLIENT:-0} == 1 )) && [[ -x "${SCRIPT_DIR}/client_dhcp.sh" ]]; then
-        log_info "Activating LAN client DHCP leasing via client_dhcp.sh..."
+    if (( ${LAN_DHCP_CLIENT:-1} == 1 )) && [[ -x "${SCRIPT_DIR}/client_dhcp.sh" ]]; then
+        log_info "Activating LAN client dynamic DHCP leasing from DUT via client_dhcp.sh..."
         "${SCRIPT_DIR}/client_dhcp.sh" renew all || true
     fi
 
