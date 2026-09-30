@@ -116,19 +116,17 @@ run_phase_wire_rate() {
         local fwd_out="${SCENARIO_TMP_DIR}/iperf_uni_fwd.json"
         local rev_out="${SCENARIO_TMP_DIR}/iperf_uni_rev.json"
 
-        # Forward Direction: WAN -> PC
-        ip netns exec "${PC_NS:-ns-pc}" pkill -TERM iperf3 2>/dev/null || true
-        ip netns exec "${PC_NS:-ns-pc}" iperf3 -s -p 5002 -D >/dev/null 2>&1
-        sleep 0.3
-        ip netns exec "${WAN_NS:-ns-wan}" iperf3 -c "${PC_IP:-192.168.1.10}" -u -p 5002 -b 950M -l 982 -t 3 -J > "${fwd_out}" 2>&1 || true
-        ip netns exec "${PC_NS:-ns-pc}" pkill -TERM iperf3 2>/dev/null || true
-        sleep 0.3
-
-        # Reverse Direction: PC -> WAN
+        # Start iperf3 server in ns-wan (central WAN endpoint)
         ip netns exec "${WAN_NS:-ns-wan}" pkill -TERM iperf3 2>/dev/null || true
         ip netns exec "${WAN_NS:-ns-wan}" iperf3 -s -p 5002 -D >/dev/null 2>&1
         sleep 0.3
-        ip netns exec "${PC_NS:-ns-pc}" iperf3 -c "${WAN_SERVER_IP:-203.0.113.1}" -u -p 5002 -b 950M -l 982 -t 3 -J > "${rev_out}" 2>&1 || true
+
+        # Downlink Direction: WAN -> PC (Initiated by PC with -R Reverse mode to pass NAT firewall)
+        ip netns exec "${PC_NS:-ns-pc}" iperf3 -c "${WAN_SERVER_IP:-10.10.0.1}" -u -p 5002 -b 950M -l 982 -t 3 -R -J > "${fwd_out}" 2>&1 || true
+        sleep 0.3
+
+        # Uplink Direction: PC -> WAN (Initiated by PC to WAN server)
+        ip netns exec "${PC_NS:-ns-pc}" iperf3 -c "${WAN_SERVER_IP:-10.10.0.1}" -u -p 5002 -b 950M -l 982 -t 3 -J > "${rev_out}" 2>&1 || true
         ip netns exec "${WAN_NS:-ns-wan}" pkill -TERM iperf3 2>/dev/null || true
 
         # Consolidate bidirectional results into standard schema
@@ -214,10 +212,11 @@ print(json.dumps(res, indent=2))
     # Allow 1.2s for DUT IGMP Snooping/Proxy and hardware multicast forwarding table to converge
     sleep 1.2
 
-    # Start multicast sender in WAN namespace
+    # Start multicast sender in WAN namespace with warmup burst to trigger HW flow cache
     ip netns exec "${WAN_NS:-ns-wan}" "${tools_dir}/traffic_generator.py" mcast-send \
         --group-ip "${MULTICAST_GROUP:-239.255.0.1}" --port 5003 \
-        --packet-size "${MULTICAST_PACKET_SIZE:-1024}" --packets 2000 --rate-mbps 80.0
+        --packet-size "${MULTICAST_PACKET_SIZE:-1024}" --packets 2000 --rate-mbps 80.0 \
+        --warmup-packets 30
 
     wait "${mcast_rx_pid}" || true
     if [[ -n "${mcast_fwd_pid}" ]]; then
