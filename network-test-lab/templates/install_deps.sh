@@ -157,6 +157,61 @@ disable_host_services() {
     done
 }
 
+wait_for_dpkg_lock() {
+    local timeout="${1:-300}"
+    local lock_files=(
+        "/var/lib/dpkg/lock-frontend"
+        "/var/lib/dpkg/lock"
+        "/var/lib/apt/lists/lock"
+    )
+    local elapsed=0
+    local warned=0
+
+    while (( elapsed < timeout )); do
+        local is_locked=0
+        local holder_info=""
+
+        for lf in "${lock_files[@]}"; do
+            if [[ -f "${lf}" ]]; then
+                if command -v fuser >/dev/null 2>&1; then
+                    local pids
+                    pids="$(fuser "${lf}" 2>/dev/null || true)"
+                    if [[ -n "${pids// }" ]]; then
+                        is_locked=1
+                        holder_info="held on ${lf} by PID(s): ${pids// }"
+                        break
+                    fi
+                elif command -v lsof >/dev/null 2>&1; then
+                    if lsof "${lf}" >/dev/null 2>&1; then
+                        is_locked=1
+                        holder_info="held on ${lf}"
+                        break
+                    fi
+                fi
+            fi
+        done
+
+        if (( is_locked == 0 )); then
+            if (( warned == 1 )); then
+                log_success "Package manager lock released. Continuing with installation..."
+            fi
+            return 0
+        fi
+
+        if (( warned == 0 )); then
+            log_info "Package manager lock detected (${holder_info})."
+            log_info "Waiting for background process (e.g. unattended-upgrades) to release lock (timeout: ${timeout}s)..."
+            warned=1
+        fi
+
+        sleep 3
+        elapsed=$(( elapsed + 3 ))
+    done
+
+    log_warn "Wait timeout (${timeout}s) exceeded. Attempting installation with APT Lock Timeout..."
+    return 0
+}
+
 install_packages() {
     local auto_yes="$1"
     require_root
@@ -165,11 +220,13 @@ install_packages() {
 
     if command -v apt-get >/dev/null 2>&1; then
         log_info "Detected Debian/Ubuntu APT package manager."
+        wait_for_dpkg_lock 300
+
         log_info "Updating package lists..."
-        apt-get update -y
+        apt-get -o DPkg::Lock::Timeout=300 update -y
 
         log_info "Installing required packages..."
-        local apt_opts=("-y" "--no-install-recommends")
+        local apt_opts=("-y" "--no-install-recommends" "-o" "DPkg::Lock::Timeout=300")
         DEBIAN_FRONTEND=noninteractive apt-get install "${apt_opts[@]}" "${DEBIAN_PACKAGES[@]}"
 
         disable_host_services
