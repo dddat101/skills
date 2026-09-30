@@ -176,15 +176,17 @@ render_wan_template() {
         "${src}" > "${dst}"
 }
 
-start_dhcp4_dnsmasq() {
-    local ns_if
-    ns_if="$(get_wan_if)"
-    local pidfile="${STATE_DIR}/dnsmasq-dhcp4.pid"
-    local conffile="${STATE_DIR}/dnsmasq-dhcp4.conf"
-    local leasefile="${STATE_DIR}/dnsmasq-dhcp4.leases"
-    local logfile="${LOG_DIR}/dnsmasq-dhcp4.log"
+start_dnsmasq_fallback() {
+    local ns_if="${1:-$(get_wan_if)}"
+    local is_v4="${2:-1}"
+    local is_v6="${3:-1}"
 
     require_command dnsmasq
+    local pidfile="${STATE_DIR}/dnsmasq-wan.pid"
+    local conffile="${STATE_DIR}/dnsmasq-wan.conf"
+    local leasefile="${STATE_DIR}/dnsmasq-wan.leases"
+    local logfile="${LOG_DIR}/dnsmasq-wan.log"
+
     stop_pidfile "${pidfile}"
 
     local pool_start="${WAN_DHCP_RANGE_START:-${WAN_DHCP_POOL_START:-203.0.113.100}}"
@@ -198,15 +200,36 @@ start_dhcp4_dnsmasq() {
         printf 'no-hosts\n'
         printf 'bind-interfaces\n'
         printf 'interface=%s\n' "${ns_if}"
-        printf 'dhcp-range=%s,%s,255.255.255.0,%ss\n' \
-            "${pool_start}" \
-            "${pool_end}" \
-            "${lease_sec}"
-        printf 'dhcp-option=option:router,%s\n' "${gw_ip}"
-        printf 'dhcp-option=option:dns-server,%s,8.8.8.8\n' "${gw_ip}"
-        if [[ -n "${DUT_WAN_IP:-}" && -n "${DUT_WAN_MAC:-}" ]]; then
-            printf 'dhcp-host=%s,%s\n' "${DUT_WAN_MAC}" "${DUT_WAN_IP}"
+
+        if (( is_v4 == 1 )); then
+            printf 'dhcp-range=%s,%s,255.255.255.0,%ss\n' \
+                "${pool_start}" \
+                "${pool_end}" \
+                "${lease_sec}"
+            printf 'dhcp-option=option:router,%s\n' "${gw_ip}"
+            printf 'dhcp-option=option:dns-server,%s,8.8.8.8\n' "${gw_ip}"
+            if [[ -n "${DUT_WAN_IP:-}" && -n "${DUT_WAN_MAC:-}" ]]; then
+                printf 'dhcp-host=%s,%s\n' "${DUT_WAN_MAC}" "${DUT_WAN_IP}"
+            fi
         fi
+
+        if (( is_v6 == 1 )); then
+            printf 'enable-ra\n'
+            local v6_mode="${WAN_IPV6_MODE:-dual-stack}"
+            case "${v6_mode}" in
+                slaac)
+                    printf 'dhcp-range=2001:db8:10::1000,2001:db8:10::1fff,slaac,64,%ss\n' "${lease_sec}"
+                    ;;
+                stateless)
+                    printf 'dhcp-range=2001:db8:10::,ra-stateless,64,%ss\n' "${lease_sec}"
+                    ;;
+                *)
+                    printf 'dhcp-range=2001:db8:10::1000,2001:db8:10::1fff,64,%ss\n' "${lease_sec}"
+                    ;;
+            esac
+            printf 'dhcp-option=option6:dns-server,[2001:db8:10::1]\n'
+        fi
+
         printf 'dhcp-authoritative\n'
         printf 'dhcp-leasefile=%s\n' "${leasefile}"
         printf 'log-facility=%s\n' "${logfile}"
@@ -220,36 +243,33 @@ start_dhcp4_dnsmasq() {
     sleep 0.5
 
     if ! is_pidfile_running "${pidfile}"; then
-        log_error "dnsmasq (IPv4 DHCP) failed to start. Check ${logfile}"
+        log_error "dnsmasq fallback failed to start. Check ${logfile}"
         tail -n 20 "${logfile}" >&2 || true
-        die "Failed to start IPv4 DHCP server."
+        return 1
     fi
-    log_success "dnsmasq (IPv4 DHCP server) active on ${NS_WAN}:${ns_if} [PID: $(cat "${pidfile}")] (Pool: ${pool_start} - ${pool_end})"
+    log_success "dnsmasq fallback active on ${NS_WAN}:${ns_if} [PID: $(cat "${pidfile}")]"
+    return 0
 }
 
 start_dhcp4_kea() {
     prepare_kea_runtime
 
-    local ns_if
-    ns_if="$(get_wan_if)"
+    local ns_if="${1:-$(get_wan_if)}"
     local src="${PROJECT_ROOT}/config/kea/kea-dhcp4.conf.in"
     local dst="${STATE_DIR}/kea-dhcp4.conf"
     local pidfile="${STATE_DIR}/kea-dhcp4.pid"
     local logfile="${LOG_DIR}/kea-dhcp4.log"
 
     if ! command -v kea-dhcp4 >/dev/null 2>&1; then
-        log_warn "kea-dhcp4 binary not found; falling back to dnsmasq."
-        start_dhcp4_dnsmasq
-        return 0
+        log_warn "kea-dhcp4 binary not found."
+        return 1
     fi
 
     if [[ ! -f "${src}" ]]; then
-        log_warn "Kea template ${src} not found; falling back to dnsmasq."
-        start_dhcp4_dnsmasq
-        return 0
+        log_warn "Kea DHCPv4 template ${src} not found."
+        return 1
     fi
 
-    # Render template
     render_wan_template "${src}" "${dst}" "${ns_if}"
     stop_pidfile "${pidfile}"
 
@@ -264,9 +284,99 @@ start_dhcp4_kea() {
         return 0
     fi
 
-    log_warn "kea-dhcp4 failed to start. Activating robust dnsmasq DHCP fallback..."
-    tail -n 10 "${logfile}" >&2 || true
-    start_dhcp4_dnsmasq
+    log_warn "kea-dhcp4 failed to start. Check ${logfile}"
+    stop_pidfile "${pidfile}"
+    return 1
+}
+
+start_radvd() {
+    local ns_if="${1:-$(get_wan_if)}"
+    local src="${PROJECT_ROOT}/config/radvd/radvd.conf.in"
+    local dst="${STATE_DIR}/radvd.conf"
+    local pidfile="${STATE_DIR}/radvd.pid"
+    local logfile="${LOG_DIR}/radvd.log"
+
+    if ! command -v radvd >/dev/null 2>&1; then
+        log_warn "radvd binary not found; skipping IPv6 Router Advertisement."
+        return 1
+    fi
+
+    if [[ ! -f "${src}" ]]; then
+        log_warn "radvd template ${src} not found; skipping Router Advertisement."
+        return 1
+    fi
+
+    # radvd requires IPv6 forwarding enabled in namespace
+    ip netns exec "${NS_WAN}" sysctl -q -w net.ipv6.conf.all.forwarding=1 2>/dev/null || true
+    ip netns exec "${NS_WAN}" sysctl -q -w net.ipv6.conf.default.forwarding=1 2>/dev/null || true
+    ip netns exec "${NS_WAN}" sysctl -q -w "net.ipv6.conf.${ns_if}.forwarding=1" 2>/dev/null || true
+
+    render_wan_template "${src}" "${dst}" "${ns_if}"
+    chmod 0644 "${dst}" 2>/dev/null || true
+    stop_pidfile "${pidfile}"
+
+    ip netns exec "${NS_WAN}" radvd -C "${dst}" -p "${pidfile}" -m logfile -l "${logfile}" 2>/dev/null || true
+    sleep 0.3
+
+    if is_pidfile_running "${pidfile}"; then
+        log_success "radvd active on ${NS_WAN}:${ns_if} [PID: $(cat "${pidfile}")] (Mode: ${WAN_IPV6_MODE:-dual-stack})"
+        return 0
+    else
+        log_warn "radvd failed to start. Check ${logfile}"
+        return 1
+    fi
+}
+
+start_dhcp6_kea() {
+    prepare_kea_runtime
+
+    local ns_if="${1:-$(get_wan_if)}"
+    local src="${PROJECT_ROOT}/config/kea/kea-dhcp6.conf.in"
+    local dst="${STATE_DIR}/kea-dhcp6.conf"
+    local pidfile="${STATE_DIR}/kea-dhcp6.pid"
+    local logfile="${LOG_DIR}/kea-dhcp6.log"
+
+    if ! command -v kea-dhcp6 >/dev/null 2>&1; then
+        log_warn "kea-dhcp6 binary not found."
+        return 1
+    fi
+
+    if [[ ! -f "${src}" ]]; then
+        log_warn "Kea DHCPv6 template ${src} not found."
+        return 1
+    fi
+
+    # Ensure link-local exists on interface for raw socket binding
+    if ! ip netns exec "${NS_WAN}" ip -6 -o addr show dev "${ns_if}" scope link 2>/dev/null | grep -q 'inet6 '; then
+        ip -n "${NS_WAN}" -6 addr add "fe80::254/64" dev "${ns_if}" nodad 2>/dev/null || true
+    fi
+
+    # Ensure static global WAN IPv6 address exists on interface
+    local wan_v6_addr="${WAN_IPV6_CIDR:-2001:db8:10::1/64}"
+    if ! ip netns exec "${NS_WAN}" ip -6 -o addr show dev "${ns_if}" scope global 2>/dev/null | grep -q 'inet6 '; then
+        ip -n "${NS_WAN}" -6 addr add "${wan_v6_addr}" dev "${ns_if}" nodad 2>/dev/null || true
+    fi
+
+    render_wan_template "${src}" "${dst}" "${ns_if}"
+    stop_pidfile "${pidfile}"
+
+    nohup ip netns exec "${NS_WAN}" \
+        env KEA_PIDFILE_DIR="/run/kea" KEA_LOCKFILE_DIR="/run/lock/kea" \
+        kea-dhcp6 -c "${dst}" > "${logfile}" 2>&1 &
+    printf '%s\n' "$!" > "${pidfile}"
+    sleep 0.5
+
+    if is_pidfile_running "${pidfile}" && ! grep -q "DHCPSRV_NO_SOCKETS_OPEN" "${logfile}" 2>/dev/null; then
+        local pd_prefix="${PD_PREFIX:-2001:db8:100::}"
+        local pd_len="${PD_PREFIX_LEN:-56}"
+        local pd_deg="${PD_DELEGATED_LEN:-60}"
+        log_success "kea-dhcp6 server active on ${NS_WAN}:${ns_if} [PID: $(cat "${pidfile}")] (IA_NA + IA_PD: ${pd_prefix}/${pd_len} -> /${pd_deg})"
+        return 0
+    fi
+
+    log_warn "kea-dhcp6 failed to start or bind sockets. Check ${logfile}"
+    stop_pidfile "${pidfile}"
+    return 1
 }
 
 start_services() {
@@ -281,15 +391,61 @@ start_services() {
 
     stop_services >/dev/null 2>&1 || true
 
-    log_info "Starting WAN DHCP services in ${NS_WAN} (Backend: ${backend})..."
+    local ns_if
+    ns_if="$(get_wan_if)"
 
-    if [[ "${backend}" == "dnsmasq" ]]; then
-        start_dhcp4_dnsmasq
-    elif [[ "${backend}" == "kea" ]]; then
-        start_dhcp4_kea
-    else
-        # Auto backend: Try Kea, fallback to dnsmasq
-        start_dhcp4_kea
+    local ip_ver="${IP_VERSION:-dual}"
+    local is_v4=0
+    local is_v6=0
+
+    case "${ip_ver}" in
+        dual|dual-stack|ds) is_v4=1; is_v6=1 ;;
+        4|v4|ipv4)          is_v4=1; is_v6=0 ;;
+        6|v6|ipv6)          is_v4=0; is_v6=1 ;;
+        *)                  is_v4=1; is_v6=1 ;;
+    esac
+
+    log_info "Starting WAN DHCP services in ${NS_WAN} (IP_VERSION: ${ip_ver}, Backend: ${backend})..."
+
+    local v6_mode="${WAN_IPV6_MODE:-dual-stack}"
+    local kea_v4_ok=0
+    local kea_v6_ok=0
+
+    if [[ "${backend}" == "kea" || "${backend}" == "auto" ]]; then
+        # 1. Start IPv4 Kea DHCP
+        if (( is_v4 == 1 )); then
+            if start_dhcp4_kea "${ns_if}"; then
+                kea_v4_ok=1
+            fi
+        fi
+
+        # 2. Start IPv6 Router Advertisement (radvd) & Kea DHCPv6
+        if (( is_v6 == 1 )); then
+            start_radvd "${ns_if}" || true
+            if [[ "${v6_mode}" == "slaac" ]]; then
+                kea_v6_ok=1
+            else
+                if start_dhcp6_kea "${ns_if}"; then
+                    kea_v6_ok=1
+                fi
+            fi
+        fi
+    fi
+
+    # Fallback to dnsmasq if Kea failed or backend was explicitly dnsmasq
+    local need_fallback_v4=0
+    local need_fallback_v6=0
+
+    if (( is_v4 == 1 && kea_v4_ok == 0 )); then
+        need_fallback_v4=1
+    fi
+    if (( is_v6 == 1 && kea_v6_ok == 0 )); then
+        need_fallback_v6=1
+    fi
+
+    if (( need_fallback_v4 == 1 || need_fallback_v6 == 1 )); then
+        log_warn "Activating dnsmasq fallback (v4=${need_fallback_v4}, v6=${need_fallback_v6})..."
+        start_dnsmasq_fallback "${ns_if}" "${need_fallback_v4}" "${need_fallback_v6}"
     fi
 }
 

@@ -68,19 +68,35 @@ main() {
 
     # 3. Namespaces & Interfaces
     print_section "NETWORK NAMESPACES & INTERFACES"
+    local all_ns=(
+        "${WAN_NS:-ns-wan}"
+        "${DUT_NS:-ns-dut}"
+        "${PC_NS:-ns-pc}"
+        "${STB_NS:-ns-stb}"
+        "${WLAN2G_NS:-ns-wlan2g}"
+        "${WLAN5G_NS:-ns-wlan5g}"
+        "${WLAN6G_NS:-ns-wlan6g}"
+        "${PHONE1_NS:-ns-phone1}"
+        "${PHONE2_NS:-ns-phone2}"
+    )
+
     if is_root; then
         local ns
-        for ns in "${WAN_NS:-ns-wan}" "${LAN_NS:-ns-lan}" "${DUT_NS:-ns-dut}"; do
+        for ns in "${all_ns[@]}"; do
             if ns_exists "${ns}"; then
                 printf 'Namespace: \e[1;36m%s\e[0m\n' "${ns}"
                 ip netns exec "${ns}" ip -br -4 addr show 2>/dev/null | awk '{printf "  [IPv4] %-12s %s\n", $1, $3}' || true
                 ip netns exec "${ns}" ip -br -6 addr show 2>/dev/null | awk '{printf "  [IPv6] %-12s %s\n", $1, $3}' || true
                 ip netns exec "${ns}" ip -4 route show 2>/dev/null | awk '{printf "    v4 route: %s\n", $0}' || true
-                ip netns exec "${ns}" ip -6 route show 2>/dev/null | awk '{printf "    v6 route: %s\n", $0}' || true
+                ip netns exec "${ns}" ip -6 route show default 2>/dev/null | awk '{printf "    v6 route: %s\n", $0}' || true
+                if [[ "${ns}" == "${DUT_NS:-ns-dut}" ]]; then
+                    printf '  [QoS/Traffic Control on STB Link]\n'
+                    ip netns exec "${ns}" tc qdisc show dev veth-dut-stb 2>/dev/null | awk '{printf "    tc: %s\n", $0}' || true
+                fi
             fi
         done
     else
-        printf 'Note: Run with sudo to inspect internal netns IPs and routing tables.\n'
+        printf 'Note: Run with sudo to inspect internal netns IPs, routing, and traffic control rules.\n'
         ip netns list 2>/dev/null | awk '{printf "Namespace present: %s\n", $1}' || true
     fi
 
