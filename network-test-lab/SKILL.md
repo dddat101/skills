@@ -53,6 +53,8 @@ For a complete breakdown of each principle, see [references/principles_and_archi
     │   └── udhcpc.script         # Namespace-safe DHCP event script
     ├── setup.sh                  # Topology builder with auto-rollback trap
     ├── cleanup.sh                # Idempotent teardown & NIC restoration
+    ├── wan_server.sh             # Upstream WAN DHCP server emulator (Kea/dnsmasq)
+    ├── client_dhcp.sh            # LAN client DHCP manager (udhcpc/dhclient)
     ├── capture.sh                # Background packet capture manager (tcpdump-first)
     ├── show_state.sh             # Runtime status inspector & stale PID detector
     ├── diagnose.sh               # Non-destructive pre-flight diagnostic runner

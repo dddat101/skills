@@ -147,6 +147,8 @@ main() {
     cp "${TEMPLATES_DIR}/radvd.conf.in" "${target_dir}/config/radvd/radvd.conf.in"
     cp "${TEMPLATES_DIR}/setup.sh" "${target_dir}/scripts/setup.sh"
     cp "${TEMPLATES_DIR}/cleanup.sh" "${target_dir}/scripts/cleanup.sh"
+    cp "${TEMPLATES_DIR}/wan_server.sh" "${target_dir}/scripts/wan_server.sh"
+    cp "${TEMPLATES_DIR}/client_dhcp.sh" "${target_dir}/scripts/client_dhcp.sh"
     cp "${TEMPLATES_DIR}/capture.sh" "${target_dir}/scripts/capture.sh"
     cp "${TEMPLATES_DIR}/show_state.sh" "${target_dir}/scripts/show_state.sh"
     cp "${TEMPLATES_DIR}/diagnose.sh" "${target_dir}/scripts/diagnose.sh"

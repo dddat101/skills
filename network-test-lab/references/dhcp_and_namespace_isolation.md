@@ -430,3 +430,42 @@ dhcp-leasefile=state/dnsmasq-wan.leases
 log-facility=logs/dnsmasq-wan.log
 log-dhcp
 ```
+
+---
+
+## 4. Centralized Domain Architecture: `wan_server.sh` and `client_dhcp.sh`
+
+In mature network test labs, DHCP and service configuration logic should **not** bloat `common.sh`. Instead, adopt the **Centralized Domain Architecture** (Option C):
+
+```
+scripts/
+├── setup.sh                 # Orchestrator (calls wan_server.sh & client_dhcp.sh)
+├── cleanup.sh               # Teardown orchestrator
+├── wan_server.sh            # Dedicated WAN server manager (Kea / dnsmasq / radvd)
+├── client_dhcp.sh           # Dedicated LAN client manager (udhcpc / dhclient)
+└── lib/
+    ├── common.sh            # Slim helper library (OS/netns primitives)
+    └── logger.sh            # Logging helpers
+```
+
+### 4.1. Core Architectural Separation
+
+| Script / Module | Responsibility | CLI Commands | Key Functions |
+|---|---|---|---|
+| `scripts/lib/common.sh` | Core netns and link primitives (~500 lines) | Sourced only | `create_netns()`, `create_veth()`, `setup_bridge()`, `cleanup_pids()`, `wan_dhcp_server()` (forwarder) |
+| `scripts/wan_server.sh` | WAN service lifecycle, template rendering, and daemon fallback | `start [auto\|kea\|dnsmasq]`, `stop`, `status` | `render_wan_template()`, `prepare_kea_runtime()`, `start_kea()`, `start_dnsmasq()` |
+| `scripts/client_dhcp.sh` | LAN client DHCP lifecycle, option negotiation, and static fallback | `renew [target]`, `release [target]`, `status` | `dhcp_renew_target()`, `dhcp_release_target()`, client daemon detection (`udhcpc`/`dhclient`) |
+
+### 4.2. Key Benefits
+
+1. **Separation of Concerns & Maintainability**:
+   - `common.sh` remains clean, portable, and free of application-specific template rendering or daemon-specific quirk handling.
+   - All DHCP server logic (Kea 3.0 path sandbox overrides, AppArmor profile unloading, socket readiness delays, dnsmasq fallback profiles) is localized entirely in `wan_server.sh`.
+2. **Interactive CLI & Automated Orchestration**:
+   - Operators can run `./scripts/wan_server.sh status` or `./scripts/client_dhcp.sh renew lan1` directly from the terminal without re-running `setup.sh`.
+   - `setup.sh` and `cleanup.sh` simply invoke `./scripts/wan_server.sh` and `./scripts/client_dhcp.sh` cleanly via CLI flags (`--wan-dhcp`, `--lan-dhcp`).
+3. **Graceful Non-Root Degradation**:
+   - Both CLI tools support `-h` and `status` when run without root privileges, safely querying namespaces and pidfiles without failing unexpectedly.
+4. **Backward Compatibility**:
+   - `common.sh` retains a lightweight delegation wrapper `wan_dhcp_server()` forwarding arguments directly to `"${PROJECT_ROOT}/scripts/wan_server.sh start"`, ensuring zero disruption for legacy scripts.
+

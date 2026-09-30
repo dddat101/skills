@@ -98,6 +98,9 @@ main() {
     if [[ -x "${SCRIPT_DIR}/client_dhcp.sh" ]]; then
         "${SCRIPT_DIR}/client_dhcp.sh" release 2>/dev/null || true
     fi
+    if [[ -x "${SCRIPT_DIR}/wan_server.sh" ]]; then
+        "${SCRIPT_DIR}/wan_server.sh" stop 2>/dev/null || true
+    fi
 
     # 2. Stop daemons recorded in PID files
     local pidfile
