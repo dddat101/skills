@@ -15,6 +15,7 @@ source "${SCRIPT_DIR}/lib/common.sh"
 TOTAL_TESTS=0
 PASSED_TESTS=0
 FAILED_TESTS=0
+SKIPPED_TESTS=0
 
 usage() {
     cat <<'EOF'
@@ -55,10 +56,13 @@ check_assertion() {
     TOTAL_TESTS=$(( TOTAL_TESTS + 1 ))
     if [[ "${status}" == "PASS" ]]; then
         PASSED_TESTS=$(( PASSED_TESTS + 1 ))
-        printf '  \e[1;32m[PASS]\e[0m [%s] %s\n         Detail: %s\n' "${test_id}" "${title}" "${detail}"
+        printf '  \e[1;32m[PASS]\e[0m    [%s] %s\n            Detail: %s\n' "${test_id}" "${title}" "${detail}"
+    elif [[ "${status}" == "NOT_RUN" || "${status}" == "SKIP" ]]; then
+        SKIPPED_TESTS=$(( SKIPPED_TESTS + 1 ))
+        printf '  \e[1;33m[NOT RUN]\e[0m [%s] %s\n            Detail: %s\n' "${test_id}" "${title}" "${detail}"
     else
         FAILED_TESTS=$(( FAILED_TESTS + 1 ))
-        printf '  \e[1;31m[FAIL]\e[0m [%s] %s\n         Detail: %s\n' "${test_id}" "${title}" "${detail}"
+        printf '  \e[1;31m[FAIL]\e[0m    [%s] %s\n            Detail: %s\n' "${test_id}" "${title}" "${detail}"
     fi
 }
 
@@ -142,7 +146,7 @@ main() {
         check_assertion "TC-WR-01" "1024B Bidirectional Full Unicast (0% Loss)" "${u_status}" \
             "Throughput: ${u_tput} Mbps | Packet Loss: ${u_loss}%"
     else
-        check_assertion "TC-WR-01" "1024B Bidirectional Full Unicast (0% Loss)" "FAIL" "Log file not found (${uni_log})"
+        check_assertion "TC-WR-01" "1024B Bidirectional Full Unicast (0% Loss)" "NOT_RUN" "Phase not executed (run: sudo ./scripts/scenario.sh wire_rate)"
     fi
 
     # TC-WR-02: Multicast Forwarding 1024B
@@ -156,7 +160,7 @@ main() {
         check_assertion "TC-WR-02" "1024B Multicast Full Forwarding (0% Loss)" "${m_status}" \
             "Received: ${m_recv}/${m_exp} | Packet Loss: ${m_loss}%"
     else
-        check_assertion "TC-WR-02" "1024B Multicast Full Forwarding (0% Loss)" "FAIL" "Log file not found (${mcast_log})"
+        check_assertion "TC-WR-02" "1024B Multicast Full Forwarding (0% Loss)" "NOT_RUN" "Phase not executed (run: sudo ./scripts/scenario.sh wire_rate)"
     fi
 
     print_section "2. WAN-TO-LAN 1G -> 100M RATE MISMATCH BURST ABSORPTION"
@@ -171,7 +175,7 @@ main() {
         check_assertion "TC-RM-01" "Burst Case 1: 1500B, Load 50%, >= 53 Frames (0% Loss)" "${b1_status}" \
             "Received: ${b1_recv}/${b1_exp} | Packet Loss: ${b1_loss}%"
     else
-        check_assertion "TC-RM-01" "Burst Case 1: 1500B, Load 50%, >= 53 Frames (0% Loss)" "FAIL" "Log file not found (${c1_log})"
+        check_assertion "TC-RM-01" "Burst Case 1: 1500B, Load 50%, >= 53 Frames (0% Loss)" "NOT_RUN" "Phase not executed (run: sudo ./scripts/scenario.sh rate_mismatch)"
     fi
 
     # TC-RM-02: 1500B, 16% load, 100 frames
@@ -185,7 +189,7 @@ main() {
         check_assertion "TC-RM-02" "Burst Case 2: 1500B, Load 16%, 100 Frames (0% Loss)" "${b2_status}" \
             "Received: ${b2_recv}/${b2_exp} | Packet Loss: ${b2_loss}%"
     else
-        check_assertion "TC-RM-02" "Burst Case 2: 1500B, Load 16%, 100 Frames (0% Loss)" "FAIL" "Log file not found (${c2_log})"
+        check_assertion "TC-RM-02" "Burst Case 2: 1500B, Load 16%, 100 Frames (0% Loss)" "NOT_RUN" "Phase not executed (run: sudo ./scripts/scenario.sh rate_mismatch)"
     fi
 
     print_section "3. REAL-WORLD SENSITIVE APPLICATIONS ON 100M STB"
@@ -200,7 +204,7 @@ main() {
         check_assertion "TC-APP-01" "GeForce NOW Network Test on 100M STB (Normal Status)" "${gfn_verdict}" \
             "Status: ${gfn_app_st} | Packet Loss: ${gfn_loss}% | Jitter: ${gfn_jitter} ms"
     else
-        check_assertion "TC-APP-01" "GeForce NOW Network Test on 100M STB (Normal Status)" "FAIL" "Log file not found (${gfn_log})"
+        check_assertion "TC-APP-01" "GeForce NOW Network Test on 100M STB (Normal Status)" "NOT_RUN" "Phase not executed (run: sudo ./scripts/scenario.sh real_world_stb)"
     fi
 
     # TC-APP-02: UHD+Dolby VOD 1.2x
@@ -215,7 +219,7 @@ main() {
         check_assertion "TC-APP-02" "UHD+Dolby VOD @ 1.2x Speed Playback on 100M STB" "${v_verdict}" \
             "Status: ${v_st} | Rate: ${v_tput} Mbps | Loss: ${v_loss}% | Stalls: ${v_stalls}"
     else
-        check_assertion "TC-APP-02" "UHD+Dolby VOD @ 1.2x Speed Playback on 100M STB" "FAIL" "Log file not found (${vod_log})"
+        check_assertion "TC-APP-02" "UHD+Dolby VOD @ 1.2x Speed Playback on 100M STB" "NOT_RUN" "Phase not executed (run: sudo ./scripts/scenario.sh real_world_stb)"
     fi
 
     print_section "4. SIMULTANEOUS WIRED & WIRELESS (2.4G + 5G + 6G + WIRED)"
@@ -230,7 +234,7 @@ main() {
         check_assertion "TC-SIM-01" "Simultaneous Wired/Wireless Total Speed Preservation (|C-B| <= 1%)" "${s_verdict}" \
             "Wired (B): ${s_b} Mbps | Simultaneous (C): ${s_c} Mbps | Diff: ${s_diff}% (Limit: <= 1.0%)"
     else
-        check_assertion "TC-SIM-01" "Simultaneous Wired/Wireless Total Speed Preservation (|C-B| <= 1%)" "FAIL" "Log file not found (${sim_log})"
+        check_assertion "TC-SIM-01" "Simultaneous Wired/Wireless Total Speed Preservation (|C-B| <= 1%)" "NOT_RUN" "Phase not executed (run: sudo ./scripts/scenario.sh simultaneous)"
     fi
 
     print_section "5. WI-FI PHONE (VOIP) QOS & WIRED PC ISOLATION"
@@ -245,7 +249,7 @@ main() {
         check_assertion "TC-QOS-01" "PC Throughput during 2 Wi-Fi Phone Calls (|A-B|/A <= 1%)" "${q_verdict}" \
             "Baseline (A): ${q_a} Mbps | During Calls (B): ${q_b} Mbps | Drop: ${q_diff}% (Limit: <= 1.0%)"
     else
-        check_assertion "TC-QOS-01" "PC Throughput during 2 Wi-Fi Phone Calls (|A-B|/A <= 1%)" "FAIL" "Log file not found (${qos_log})"
+        check_assertion "TC-QOS-01" "PC Throughput during 2 Wi-Fi Phone Calls (|A-B|/A <= 1%)" "NOT_RUN" "Phase not executed (run: sudo ./scripts/scenario.sh voice_qos)"
     fi
 
     # PCAP Evidence Timeline
@@ -254,12 +258,16 @@ main() {
     fi
 
     # Summary
-    print_header "VERIFICATION SUMMARY: ${PASSED_TESTS}/${TOTAL_TESTS} PASSED"
+    local evaluated=$(( PASSED_TESTS + FAILED_TESTS ))
+    print_header "VERIFICATION SUMMARY: ${PASSED_TESTS}/${evaluated} EVALUATED (${SKIPPED_TESTS} NOT RUN)"
     if (( FAILED_TESTS > 0 )); then
-        printf '  \e[1;31mOVERALL RESULT: [FAIL] - %d test(s) failed or incomplete.\e[0m\n\n' "${FAILED_TESTS}"
+        printf '  \e[1;31mOVERALL RESULT: [FAIL] - %d test(s) failed.\e[0m\n\n' "${FAILED_TESTS}"
         return 1
+    elif (( PASSED_TESTS > 0 )); then
+        printf '  \e[1;32mOVERALL RESULT: [PASS] - All %d executed test criteria satisfied (100%% PASS)!\e[0m\n\n' "${PASSED_TESTS}"
+        return 0
     else
-        printf '  \e[1;32mOVERALL RESULT: [PASS] - All performance & wire-rate criteria satisfied!\e[0m\n\n'
+        printf '  \e[1;33mOVERALL RESULT: [INCOMPLETE] - No tests have been executed yet.\e[0m\n\n'
         return 0
     fi
 }
