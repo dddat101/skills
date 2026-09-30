@@ -1,7 +1,7 @@
 ---
 name: network-test-lab
 description: >-
-  Comprehensive guide, standards, and automation tooling for designing, scaffolding, running, and verifying Linux Network Test Labs (using network namespaces, veth pairs, Linux bridges, automated packet capture, and PCAP analysis). Activate this skill when the user asks to create or scaffold a network test lab, write or modify network lab scripts (setup.sh, cleanup.sh, capture.sh, scenario.sh, verify_*.sh, diagnose.sh, show_state.sh), manage network namespaces, veth pairs, Linux bridges, DHCP client/server isolation, or debug network test issues (host safety, NetworkManager conflicts, SIGPIPE 141, tshark privilege drops, stale PIDs, non-root CLI standards).
+  Comprehensive guide, standards, and automation tooling for designing, scaffolding, running, and verifying Linux Network Test Labs (using network namespaces, veth pairs, Linux bridges, automated packet capture, and PCAP analysis). Activate this skill when the user asks to create or scaffold a network test lab, write or modify network lab scripts (install_deps.sh, setup.sh, cleanup.sh, capture.sh, scenario.sh, verify_*.sh, diagnose.sh, show_state.sh), manage network namespaces, veth pairs, Linux bridges, DHCP client/server isolation, or debug network test issues (host safety, NetworkManager conflicts, SIGPIPE 141, tshark privilege drops, stale PIDs, non-root CLI standards).
 ---
 
 # Linux Network Test Lab Framework
@@ -51,6 +51,7 @@ For a complete breakdown of each principle, see [references/principles_and_archi
     ├── lib/
     │   ├── common.sh             # Core helper library
     │   └── udhcpc.script         # Namespace-safe DHCP event script
+    ├── install_deps.sh           # Host dependency installer & systemd daemon isolator
     ├── setup.sh                  # Topology builder with auto-rollback trap
     ├── cleanup.sh                # Idempotent teardown & NIC restoration
     ├── wan_server.sh             # Upstream WAN DHCP server emulator (Kea/dnsmasq)
@@ -217,6 +218,7 @@ Detailed guide: [references/pcap_verification_and_evidence.md](references/pcap_v
 - [templates/kea-dhcp6.conf.in](templates/kea-dhcp6.conf.in): Standard Kea DHCPv6 configuration template with IA_NA and IA_PD prefix delegation.
 - [templates/radvd.conf.in](templates/radvd.conf.in): Standard Router Advertisement daemon template.
 - [templates/udhcpc.script](templates/udhcpc.script): Namespace-safe DHCP configuration event script.
+- [templates/install_deps.sh](templates/install_deps.sh): Host dependency installer and netns daemon isolation script.
 - [templates/setup.sh](templates/setup.sh): Topology setup script with auto-rollback trap.
 - [templates/cleanup.sh](templates/cleanup.sh): Idempotent teardown and NIC restoration script.
 - [templates/capture.sh](templates/capture.sh): Background packet capture lifecycle manager.

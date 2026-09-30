@@ -145,6 +145,7 @@ main() {
     cp "${TEMPLATES_DIR}/kea-dhcp4.conf.in" "${target_dir}/config/kea/kea-dhcp4.conf.in"
     cp "${TEMPLATES_DIR}/kea-dhcp6.conf.in" "${target_dir}/config/kea/kea-dhcp6.conf.in"
     cp "${TEMPLATES_DIR}/radvd.conf.in" "${target_dir}/config/radvd/radvd.conf.in"
+    cp "${TEMPLATES_DIR}/install_deps.sh" "${target_dir}/scripts/install_deps.sh"
     cp "${TEMPLATES_DIR}/setup.sh" "${target_dir}/scripts/setup.sh"
     cp "${TEMPLATES_DIR}/cleanup.sh" "${target_dir}/scripts/cleanup.sh"
     cp "${TEMPLATES_DIR}/wan_server.sh" "${target_dir}/scripts/wan_server.sh"
@@ -202,6 +203,9 @@ sequenceDiagram
 ## Quick Start
 
 \`\`\`bash
+# 0. Install host dependencies (or check with --check-only)
+sudo ./scripts/install_deps.sh
+
 # 1. Pre-flight diagnostics
 ./scripts/diagnose.sh
 
