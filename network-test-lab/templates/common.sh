@@ -19,6 +19,7 @@ log_warn()    { printf '\e[1;33m[WARN]\e[0m    %s\n' "$*" >&2; }
 log_error()   { printf '\e[1;31m[ERROR]\e[0m   %s\n' "$*" >&2; }
 log_step()    { printf '\e[1;36m===> %s\e[0m\n' "$*"; }
 die()         { log_error "$*"; exit 1; }
+fatal()       { die "$@"; }
 
 log_debug() {
     if [[ "${DEBUG:-0}" == "1" || "${VERBOSE:-0}" == "1" ]]; then
@@ -130,23 +131,49 @@ iface_exists_ns()   { ip netns exec "$1" ip link show dev "$2" >/dev/null 2>&1; 
 ns_exists()         { ip netns list 2>/dev/null | awk '{print $1}' | grep -Fxq "$1"; }
 bridge_exists()     { ip link show dev "$1" >/dev/null 2>&1; }
 
+get_host_primary_uplink() {
+    local primary=""
+    primary="$(ip route get 8.8.8.8 2>/dev/null | awk '/dev/ {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}' || true)"
+    if [[ -z "${primary}" ]]; then
+        primary="$(ip -4 route show default 2>/dev/null | sort -k7 -n | awk '/dev/ {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}' | head -n1 || true)"
+    fi
+    echo "${primary}"
+}
+
 assert_safe_test_if() {
     local iface="$1"
     [[ -n "${iface}" ]] || die "Interface name cannot be empty."
     [[ "${iface}" != "lo" ]] || die "Refusing to use loopback interface."
     iface_exists_root "${iface}" || die "Interface not found in root namespace: ${iface}"
 
-    # Protect host default route (uplink)
-    if ip route show default 2>/dev/null | grep -Eq "dev[[:space:]]+${iface}([[:space:]]|$)"; then
-        die "Interface ${iface} carries host default route! Refusing to use primary interface."
+    # Protect host primary default route (active uplink)
+    local primary_uplink
+    primary_uplink="$(get_host_primary_uplink)"
+    if [[ -n "${primary_uplink}" && "${iface}" == "${primary_uplink}" ]]; then
+        die "Interface ${iface} is the host primary internet interface! Refusing to use primary uplink."
     fi
 
     # NetworkManager smart unmanage & flush
-    if ip -4 addr show dev "${iface}" 2>/dev/null | grep -q 'inet '; then
-        log_warn "Interface ${iface} has host IPv4 address. Flushing and setting unmanaged..."
+    if ip -4 addr show dev "${iface}" 2>/dev/null | grep -q 'inet ' || ip route show default 2>/dev/null | grep -Eq "dev[[:space:]]+${iface}([[:space:]]|$)"; then
+        log_warn "Interface ${iface} has host IPv4 address or route. Flushing and setting unmanaged..."
         command -v nmcli >/dev/null 2>&1 && nmcli device set "${iface}" managed no 2>/dev/null || true
+        ip route del default dev "${iface}" 2>/dev/null || true
         ip addr flush dev "${iface}" 2>/dev/null || true
     fi
+}
+
+unmanage_interface() {
+    local iface="$1"
+    [[ -n "${iface}" ]] || return 0
+    require_root
+    assert_safe_test_if "${iface}"
+    log_info "Unmanaging test interface ${iface} from NetworkManager..."
+    if command -v nmcli >/dev/null 2>&1; then
+        nmcli device set "${iface}" managed no 2>/dev/null || true
+    fi
+    ip route del default dev "${iface}" 2>/dev/null || true
+    ip addr flush dev "${iface}" 2>/dev/null || true
+    ip link set dev "${iface}" down 2>/dev/null || true
 }
 
 namespace_ip() {
