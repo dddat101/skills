@@ -157,6 +157,20 @@ disable_host_services() {
     done
 }
 
+configure_tshark_permissions() {
+    # On Ubuntu 24.04+, AppArmor restricts tshark from reading files outside /tmp.
+    # Add generic pcap read permission to local override.
+    if [[ -d /etc/apparmor.d/local ]] && [[ -f /etc/apparmor.d/tshark ]]; then
+        if ! grep -q '\.pcap' /etc/apparmor.d/local/tshark 2>/dev/null; then
+            log_info "Configuring AppArmor to allow tshark to read .pcap files..."
+            echo 'file r /**.pcap{,ng}{,.gz},' >> /etc/apparmor.d/local/tshark 2>/dev/null || true
+            if command -v apparmor_parser >/dev/null 2>&1; then
+                apparmor_parser -r /etc/apparmor.d/tshark 2>/dev/null || true
+            fi
+        fi
+    fi
+}
+
 wait_for_dpkg_lock() {
     local timeout="${1:-300}"
     local lock_files=(
@@ -230,6 +244,7 @@ install_packages() {
         DEBIAN_FRONTEND=noninteractive apt-get install "${apt_opts[@]}" "${DEBIAN_PACKAGES[@]}"
 
         disable_host_services
+        configure_tshark_permissions
         log_success "All Debian/Ubuntu packages successfully installed and configured."
 
     elif command -v dnf >/dev/null 2>&1; then
