@@ -40,10 +40,10 @@ Options:
       Single-PC Dual-NIC physical topology connected to external DUT.
 
   --lan-dhcp, --dhcp-client
-      Enable dynamic DHCP client on LAN endpoints (leases from DUT br0).
+      Enable dynamic DHCP client on LAN endpoints (leases from DUT br0) [Default].
 
   --no-lan-dhcp, --static-lan
-      Keep static IP addresses on LAN endpoints [Default].
+      Assign static IP addresses on LAN endpoints.
 
   --wan-dhcp
       Enable upstream WAN DHCP server in ns-wan to lease IP to DUT [Default].
@@ -287,6 +287,9 @@ setup_physical_topology() {
 
     local ip_ver="${IP_VERSION:-dual}"
     if [[ "${ip_ver}" != "4" && "${ip_ver}" != "v4" && "${ip_ver}" != "ipv4" ]]; then
+        ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w net.ipv6.conf.all.dad_transmits=0 2>/dev/null || true
+        ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w net.ipv6.conf.default.dad_transmits=0 2>/dev/null || true
+        ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w "net.ipv6.conf.eth0.dad_transmits=0" 2>/dev/null || true
         ip -n "${WAN_NS:-ns-wan}" -6 addr add "${WAN_IPV6_CIDR:-2001:db8:10::1/64}" dev eth0 nodad 2>/dev/null || true
         ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w net.ipv6.conf.all.forwarding=1 2>/dev/null || true
         ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w net.ipv6.conf.default.forwarding=1 2>/dev/null || true
@@ -390,10 +393,10 @@ setup_physical_topology() {
         "${SCRIPT_DIR}/wan_server.sh" start "${WAN_DHCP_BACKEND:-auto}" || true
     fi
 
-    # 7. Start LAN client DHCP leasing from DUT if requested
+    # 7. Start LAN client dynamic DHCP daemons in background (non-blocking)
     if (( ${LAN_DHCP_CLIENT:-1} == 1 )) && [[ -x "${SCRIPT_DIR}/client_dhcp.sh" ]]; then
-        log_info "Activating LAN client dynamic DHCP leasing from DUT via client_dhcp.sh..."
-        "${SCRIPT_DIR}/client_dhcp.sh" renew all || true
+        log_info "Activating LAN client dynamic DHCP daemons via client_dhcp.sh (non-blocking)..."
+        "${SCRIPT_DIR}/client_dhcp.sh" start all || true
     fi
 
     log_success "Physical Multi-Port topology successfully established."

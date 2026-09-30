@@ -454,7 +454,7 @@ scripts/
 |---|---|---|---|
 | `scripts/lib/common.sh` | Core netns and link primitives (~500 lines) | Sourced only | `create_netns()`, `create_veth()`, `setup_bridge()`, `cleanup_pids()`, `wan_dhcp_server()` (forwarder) |
 | `scripts/wan_server.sh` | WAN service lifecycle, template rendering, and daemon fallback | `start [auto\|kea\|dnsmasq]`, `stop`, `status` | `render_wan_template()`, `prepare_kea_runtime()`, `start_kea()`, `start_dnsmasq()` |
-| `scripts/client_dhcp.sh` | LAN client DHCP lifecycle, option negotiation, and static fallback | `renew [target]`, `release [target]`, `status` | `dhcp_renew_target()`, `dhcp_release_target()`, client daemon detection (`udhcpc`/`dhclient`) |
+| `scripts/client_dhcp.sh` | LAN client DHCP daemon lifecycle, dynamic leasing, and status | `start [target]`, `renew [target]`, `stop [target]`, `release [target]`, `status` | `start_client()`, `renew_client()`, `stop_client()`, `release_client()`, `show_status()` |
 
 ### 4.2. Key Benefits
 
@@ -463,10 +463,18 @@ scripts/
    - All DHCP server logic (Kea 3.0 path sandbox overrides, AppArmor profile unloading, socket readiness delays, dnsmasq fallback profiles) is localized entirely in `wan_server.sh`.
 2. **Interactive CLI & Automated Orchestration**:
    - Operators can run `./scripts/wan_server.sh status` or `./scripts/client_dhcp.sh renew lan1` directly from the terminal without re-running `setup.sh`.
-   - `setup.sh` and `cleanup.sh` simply invoke `./scripts/wan_server.sh` and `./scripts/client_dhcp.sh` cleanly via CLI flags (`--wan-dhcp`, `--lan-dhcp`).
-3. **Graceful Non-Root Degradation**:
+   - `setup.sh` and `cleanup.sh` invoke `./scripts/wan_server.sh` and `./scripts/client_dhcp.sh` cleanly via CLI flags (`--wan-dhcp`, `--lan-dhcp`).
+3. **Non-Blocking Asynchronous Client Daemons**:
+   - In physical lab environments, Ethernet cables may not yet be connected or the DUT may still be booting when `setup.sh` runs.
+   - `setup.sh` executes `client_dhcp.sh start all`, which immediately spawns persistent background daemons (`udhcpc -f ... &` or `dhclient -nw`) and exits in milliseconds without blocking or falling back to static IPs.
+   - The daemons persistently poll and negotiate leases the instant the physical link comes up or the DUT starts its DHCP server.
+4. **Duplicate Address Detection (DAD) Socket Bind Prevention**:
+   - Kernel IPv6 auto-configuration places newly created link-local addresses (`fe80:...`) in `tentative` state while DAD probes are transmitted.
+   - Calling `bind()` on tentative addresses causes Kea DHCPv6 to fail with `EADDRNOTAVAIL` (`Cannot assign requested address`).
+   - Configuring `net.ipv6.conf.*.dad_transmits=0` in `ns-wan` ensures instantaneous address binding for carrier-grade daemons.
+5. **Graceful Non-Root Degradation**:
    - Both CLI tools support `-h` and `status` when run without root privileges, safely querying namespaces and pidfiles without failing unexpectedly.
-4. **Backward Compatibility**:
+6. **Backward Compatibility**:
    - `common.sh` retains a lightweight delegation wrapper `wan_dhcp_server()` forwarding arguments directly to `"${PROJECT_ROOT}/scripts/wan_server.sh start"`, ensuring zero disruption for legacy scripts.
 
 ### 4.3. End-to-End Dual-Stack Lifecycle in Physical Hardware Mode (`--single`)
@@ -493,6 +501,6 @@ In physical gateway benchmarking (`--single`), the lab operates as a complete ca
 1. **Upstream Provisioning**: `wan_server.sh` activates `kea-dhcp4`, `kea-dhcp6`, and `radvd` on `ns-wan:eth0`.
 2. **DUT WAN Activation**: DUT WAN (`eth1.1`) acquires its public IPv4 (`203.0.113.x`), WAN IPv6 (`2001:db8:10::x`), and delegated `/60` LAN prefix via DHCPv6-PD (`IA_PD`).
 3. **DUT LAN Services**: DUT activates internal DHCPv4 server and IPv6 Router Advertisement (`radvd`/`dnsmasq`) on LAN bridge `br0`.
-4. **LAN Client Dynamic Acquisition**: In `--single` mode, `LAN_DHCP_CLIENT="1"` is active by default. `client_dhcp.sh renew all` runs inside client namespaces (`ns-pc`), automatically leasing private IPv4 addresses and acquiring global IPv6 SLAAC addresses carved from the delegated prefix.
+4. **LAN Client Dynamic Acquisition**: In `--single` mode, `LAN_DHCP_CLIENT="1"` is active by default. `client_dhcp.sh start all` initializes background daemons inside client namespaces (`ns-pc`), automatically leasing private IPv4 addresses and acquiring global IPv6 SLAAC addresses carved from the delegated prefix once the DUT and cables are online.
 
 

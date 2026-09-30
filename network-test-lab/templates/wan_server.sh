@@ -346,7 +346,11 @@ start_dhcp6_kea() {
         return 1
     fi
 
-    # Ensure link-local exists on interface for raw socket binding
+    # Disable DAD and ensure link-local exists on interface for raw socket binding
+    ip netns exec "${NS_WAN}" sysctl -q -w net.ipv6.conf.all.dad_transmits=0 2>/dev/null || true
+    ip netns exec "${NS_WAN}" sysctl -q -w net.ipv6.conf.default.dad_transmits=0 2>/dev/null || true
+    ip netns exec "${NS_WAN}" sysctl -q -w "net.ipv6.conf.${ns_if}.dad_transmits=0" 2>/dev/null || true
+
     if ! ip netns exec "${NS_WAN}" ip -6 -o addr show dev "${ns_if}" scope link 2>/dev/null | grep -q 'inet6 '; then
         ip -n "${NS_WAN}" -6 addr add "fe80::254/64" dev "${ns_if}" nodad 2>/dev/null || true
     fi
@@ -356,6 +360,14 @@ start_dhcp6_kea() {
     if ! ip netns exec "${NS_WAN}" ip -6 -o addr show dev "${ns_if}" scope global 2>/dev/null | grep -q 'inet6 '; then
         ip -n "${NS_WAN}" -6 addr add "${wan_v6_addr}" dev "${ns_if}" nodad 2>/dev/null || true
     fi
+
+    # Wait briefly if any address is still resolving DAD (prevents EADDRNOTAVAIL socket bind error)
+    local dad_wait=0
+    while ip netns exec "${NS_WAN}" ip -6 -o addr show dev "${ns_if}" 2>/dev/null | grep -q 'tentative'; do
+        sleep 0.1
+        dad_wait=$((dad_wait + 1))
+        if (( dad_wait >= 10 )); then break; fi
+    done
 
     render_wan_template "${src}" "${dst}" "${ns_if}"
     stop_pidfile "${pidfile}"
