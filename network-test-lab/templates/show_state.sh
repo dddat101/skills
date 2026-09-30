@@ -58,9 +58,7 @@ main() {
     for br in "${WAN_BRIDGE:-br-test-wan}" "${LAN_BRIDGE:-br-test-lan}"; do
         if bridge_exists "${br}"; then
             printf 'Bridge: %s (State: UP)\n' "${br}"
-            if command -v bridge >/dev/null 2>&1; then
-                bridge link show dev "${br}" 2>/dev/null | awk '{printf "  - Member: %s\n", $2}' || true
-            fi
+            ip link show master "${br}" 2>/dev/null | grep -E '^[0-9]+:' | awk '{print "  - Member: "$2}' | tr -d ':' || true
         else
             printf 'Bridge: %s (NOT FOUND)\n' "${br}"
         fi

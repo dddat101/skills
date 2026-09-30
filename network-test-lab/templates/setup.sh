@@ -252,154 +252,170 @@ setup_virtual_topology() {
 }
 
 setup_physical_topology() {
-    log_info "Deploying physical Multi-Port / Hardware DUT topology..."
+    log_info "Deploying physical Multi-Port / Hardware DUT topology via Linux Bridges..."
     local wan_if="${WAN_IF:-}"
     local lan_if="${PC_IF:-${LAN_IF:-}}"
     local stb_if="${STB_IF:-}"
-    local trunk_if="${VLAN_TRUNK_IF:-}"
 
     if (( DRY_RUN == 1 )); then
-        log_info "[DRY-RUN] Would bind WAN_IF (${wan_if:-none}) to ns-wan"
-        log_info "[DRY-RUN] Would bind PC_IF (${lan_if:-none}) to ns-pc"
-        [[ -n "${stb_if}" ]] && log_info "[DRY-RUN] Would bind STB_IF (${stb_if}) to ns-stb (100M port)"
-        [[ -n "${trunk_if}" ]] && log_info "[DRY-RUN] Would configure 802.1Q VLAN trunk on ${trunk_if}"
+        log_info "[DRY-RUN] Would attach WAN_IF (${wan_if:-none}) to ${WAN_BRIDGE:-br-test-wan}"
+        log_info "[DRY-RUN] Would attach PC_IF (${lan_if:-none}) to ${LAN_BRIDGE:-br-test-lan}"
+        [[ -n "${stb_if}" ]] && log_info "[DRY-RUN] Would attach STB_IF (${stb_if}) to ${LAN_BRIDGE:-br-test-lan}"
         return 0
     fi
 
-    # 1. Setup WAN Interface
+    # 1. Setup WAN Bridge & Physical Adapter (Standard transparent Layer 2 bridging)
     [[ -n "${wan_if}" ]] || fatal "WAN_IF not configured in config.env"
-    ns_create "${WAN_NS:-ns-wan}"
-    unmanage_interface "${wan_if}"
-    ip link set "${wan_if}" netns "${WAN_NS:-ns-wan}"
-    if [[ -n "${WAN_VLAN_ID:-}" ]]; then
-        log_info "Configuring 802.1Q VLAN ${WAN_VLAN_ID} on physical WAN adapter (for tagged WAN)..."
-        ip -n "${WAN_NS:-ns-wan}" link set "${wan_if}" name "eth-raw"
-        ip -n "${WAN_NS:-ns-wan}" link set "eth-raw" up
-        ip -n "${WAN_NS:-ns-wan}" link add link "eth-raw" name "eth0" type vlan id "${WAN_VLAN_ID}"
-    else
-        ip -n "${WAN_NS:-ns-wan}" link set "${wan_if}" name "eth0"
-    fi
-    ip -n "${WAN_NS:-ns-wan}" link set "eth0" up
-    ip -n "${WAN_NS:-ns-wan}" addr add "${WAN_SERVER_IP:-203.0.113.1}/${WAN_PREFIX:-24}" dev eth0
-    ip -n "${WAN_NS:-ns-wan}" route replace "${DUT_LAN_IP:-192.168.1.1}/${LAN_PREFIX:-24}" via "${DUT_WAN_IP:-203.0.113.129}" dev eth0 2>/dev/null || true
-    ip -n "${WAN_NS:-ns-wan}" route replace default via "${DUT_WAN_IP:-203.0.113.129}" dev eth0 2>/dev/null || true
-    ip -n "${WAN_NS:-ns-wan}" route replace 224.0.0.0/4 dev eth0 2>/dev/null || true
+    assert_safe_test_if "${wan_if}"
 
+    bridge_create "${WAN_BRIDGE:-br-test-wan}"
+    attach_physical_to_bridge "${wan_if}" "${WAN_BRIDGE:-br-test-wan}"
+
+    # Connect ns-wan to br-test-wan via veth pair
+    ns_create "${WAN_NS:-ns-wan}"
+    local wan_veth_h="v-wan-h"
+    if ! iface_exists_ns "${WAN_NS:-ns-wan}" "eth0"; then
+        ip link del dev "${wan_veth_h}" 2>/dev/null || true
+        ip link add "${wan_veth_h}" type veth peer name "eth0" netns "${WAN_NS:-ns-wan}"
+    fi
+    ip link set dev "${wan_veth_h}" master "${WAN_BRIDGE:-br-test-wan}"
+    ip link set dev "${wan_veth_h}" up
+    ip -n "${WAN_NS:-ns-wan}" link set dev "eth0" up
+
+    # Configure WAN IPv4 on ns-wan:eth0
+    local wan_ip="${WAN_SERVER_IP:-10.10.0.1}"
+    local wan_prefix="${WAN_PREFIX:-24}"
+    ip -n "${WAN_NS:-ns-wan}" -4 addr flush dev "eth0" 2>/dev/null || true
+    ip -n "${WAN_NS:-ns-wan}" addr add "${wan_ip}/${wan_prefix}" dev eth0
+
+    # Configure WAN IPv6 with instant DAD bypass on ns-wan:eth0
     local ip_ver="${IP_VERSION:-dual}"
     if [[ "${ip_ver}" != "4" && "${ip_ver}" != "v4" && "${ip_ver}" != "ipv4" ]]; then
         ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w net.ipv6.conf.all.dad_transmits=0 2>/dev/null || true
         ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w net.ipv6.conf.default.dad_transmits=0 2>/dev/null || true
         ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w "net.ipv6.conf.eth0.dad_transmits=0" 2>/dev/null || true
-        ip -n "${WAN_NS:-ns-wan}" -6 addr add "${WAN_IPV6_CIDR:-2001:db8:10::1/64}" dev eth0 nodad 2>/dev/null || true
+        ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w "net.ipv6.conf.eth0.disable_ipv6=0" 2>/dev/null || true
+        ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w "net.ipv6.conf.eth0.accept_dad=0" 2>/dev/null || true
+
+        ip -n "${WAN_NS:-ns-wan}" -6 addr flush dev "eth0" scope global 2>/dev/null || true
+        ip -n "${WAN_NS:-ns-wan}" -6 addr replace "${WAN_IPV6_CIDR:-2001:db8:10::1/64}" dev eth0 nodad 2>/dev/null || true
+        ip -n "${WAN_NS:-ns-wan}" -6 addr replace "fe80::1/64" dev eth0 nodad 2>/dev/null || true
+
+        if [[ -n "${WAN_IPV6_DNS2:-}" && "${WAN_IPV6_DNS2}" != "${WAN_IPV6_DNS:-2001:db8:10::1}" ]]; then
+            ip -n "${WAN_NS:-ns-wan}" -6 addr add "${WAN_IPV6_DNS2}/64" dev eth0 nodad 2>/dev/null || true
+        fi
+
         ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w net.ipv6.conf.all.forwarding=1 2>/dev/null || true
         ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w net.ipv6.conf.default.forwarding=1 2>/dev/null || true
         ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w net.ipv6.conf.eth0.forwarding=1 2>/dev/null || true
     fi
-    log_info "Bound physical WAN_IF (${wan_if}, VLAN: ${WAN_VLAN_ID:-untagged}) to ${WAN_NS:-ns-wan} (IP: ${WAN_SERVER_IP:-203.0.113.1}, IPv6: ${WAN_IPV6_CIDR:-2001:db8:10::1/64})"
 
-    # 2. Setup PC Interface (Gigabit LAN port)
-    ns_create "${PC_NS:-ns-pc}"
-    if [[ -n "${trunk_if}" ]]; then
-        # 802.1Q VLAN Trunk Mode
-        ip link set "${trunk_if}" up 2>/dev/null || true
-        local pc_vlan="${trunk_if}.${VLAN_ID_PC:-10}"
-        ip link add link "${trunk_if}" name "${pc_vlan}" type vlan id "${VLAN_ID_PC:-10}"
-        ip link set "${pc_vlan}" netns "${PC_NS:-ns-pc}"
-        ip -n "${PC_NS:-ns-pc}" link set "${pc_vlan}" name "eth0"
-    else
-        [[ -n "${lan_if}" ]] || fatal "LAN_IF / PC_IF not configured in config.env"
-        unmanage_interface "${lan_if}"
-        ip link set "${lan_if}" netns "${PC_NS:-ns-pc}"
-        ip -n "${PC_NS:-ns-pc}" link set "${lan_if}" name "eth0"
-    fi
-    ip -n "${PC_NS:-ns-pc}" link set "eth0" up
-    if (( ${LAN_DHCP_CLIENT:-1} == 1 )); then
-        log_info "Bound physical PC interface to ${PC_NS:-ns-pc} (Dynamic DHCP Mode: leases from DUT)..."
-    else
-        ip -n "${PC_NS:-ns-pc}" addr add "${PC_IP:-192.168.1.10}/${LAN_PREFIX:-24}" dev eth0
-        ip -n "${PC_NS:-ns-pc}" route replace default via "${DUT_LAN_IP:-192.168.1.1}" dev eth0
-        log_info "Bound physical PC interface to ${PC_NS:-ns-pc} (Static IP: ${PC_IP:-192.168.1.10})"
-    fi
+    # Forwarding in ns-wan
+    ip netns exec "${WAN_NS:-ns-wan}" sysctl -q -w net.ipv4.ip_forward=1 2>/dev/null || true
+    log_info "Bound physical WAN_IF (${wan_if}) to ${WAN_BRIDGE:-br-test-wan} -> ${WAN_NS:-ns-wan}:eth0 (IP: ${wan_ip}, IPv6: ${WAN_IPV6_CIDR:-2001:db8:10::1/64})"
 
-    # 3. Setup IPTV STB Interface (Dedicated 100M port on DUT)
-    if [[ -n "${stb_if}" || -n "${trunk_if}" ]]; then
-        ns_create "${STB_NS:-ns-stb}"
-        if [[ -n "${trunk_if}" ]]; then
-            local stb_vlan="${trunk_if}.${VLAN_ID_STB:-20}"
-            ip link add link "${trunk_if}" name "${stb_vlan}" type vlan id "${VLAN_ID_STB:-20}"
-            ip link set "${stb_vlan}" netns "${STB_NS:-ns-stb}"
-            ip -n "${STB_NS:-ns-stb}" link set "${stb_vlan}" name "eth0"
-        else
-            unmanage_interface "${stb_if}"
-            ip link set "${stb_if}" netns "${STB_NS:-ns-stb}"
-            ip -n "${STB_NS:-ns-stb}" link set "${stb_if}" name "eth0"
+    # 2. Setup LAN Bridge & Physical Adapter
+    [[ -n "${lan_if}" ]] || fatal "LAN_IF / PC_IF not configured in config.env"
+    assert_safe_test_if "${lan_if}"
+
+    bridge_create "${LAN_BRIDGE:-br-test-lan}"
+    attach_physical_to_bridge "${lan_if}" "${LAN_BRIDGE:-br-test-lan}"
+
+    # Helper function to attach client endpoint namespace to br-test-lan
+    attach_client_to_lan_bridge() {
+        local client_ns="$1"
+        local host_dev="$2"
+        local client_ip="$3"
+        local rate_limit="${4:-}"
+        local burst_buf="${5:-}"
+        local queue_limit="${6:-}"
+
+        ns_create "${client_ns}"
+        if ! iface_exists_ns "${client_ns}" "eth0"; then
+            ip link del dev "${host_dev}" 2>/dev/null || true
+            ip link add "${host_dev}" type veth peer name "eth0" netns "${client_ns}"
         fi
-        ip -n "${STB_NS:-ns-stb}" link set "eth0" up
+        ip link set dev "${host_dev}" master "${LAN_BRIDGE:-br-test-lan}"
+        ip link set dev "${host_dev}" up
+        ip -n "${client_ns}" link set dev "eth0" up
+
+        # Flush static IPs if dynamic DHCP client is enabled
         if (( ${LAN_DHCP_CLIENT:-1} == 1 )); then
-            log_info "Bound physical STB interface to ${STB_NS:-ns-stb} (Dynamic DHCP Mode: leases from DUT)..."
-        else
-            ip -n "${STB_NS:-ns-stb}" addr add "${STB_IP:-192.168.1.20}/${LAN_PREFIX:-24}" dev eth0
-            ip -n "${STB_NS:-ns-stb}" route replace default via "${DUT_LAN_IP:-192.168.1.1}" dev eth0
-            log_info "Bound physical STB interface (${stb_if:-${trunk_if}.${VLAN_ID_STB:-20}}) to ${STB_NS:-ns-stb} (Static IP: ${STB_IP:-192.168.1.20})"
+            ip -n "${client_ns}" -4 addr flush dev "eth0" 2>/dev/null || true
+            ip -n "${client_ns}" -6 addr flush dev "eth0" scope global 2>/dev/null || true
+        elif [[ -n "${client_ip}" ]]; then
+            ip -n "${client_ns}" addr replace "${client_ip}/${LAN_PREFIX:-24}" dev eth0
+            ip -n "${client_ns}" route replace default via "${DUT_LAN_IP:-192.168.1.1}" dev eth0 2>/dev/null || true
         fi
-        # Force or request 100BASE-TX full-duplex on physical adapter if supported
-        ip netns exec "${STB_NS:-ns-stb}" ethtool -s eth0 speed 100 duplex full autoneg off 2>/dev/null || true
-        log_info "Bound physical STB interface (${stb_if:-${trunk_if}.${VLAN_ID_STB:-20}}) to ${STB_NS:-ns-stb} (IP: ${STB_IP:-192.168.1.20})"
-    else
-        log_warn "STB_IF not configured. Rate mismatch tests (TC-RM) will require STB_IF or virtual mode."
+
+        # IPv6 autoconf settings inside client netns
+        ip netns exec "${client_ns}" sysctl -q -w "net.ipv6.conf.eth0.accept_ra=2" 2>/dev/null || true
+        ip netns exec "${client_ns}" sysctl -q -w "net.ipv6.conf.eth0.autoconf=1" 2>/dev/null || true
+        ip netns exec "${client_ns}" sysctl -q -w "net.ipv6.conf.all.forwarding=0" 2>/dev/null || true
+
+        # Apply Traffic Control rate-limiting if specified
+        if [[ -n "${rate_limit}" ]]; then
+            local tbf_cmd=("tc" "qdisc" "replace" "dev" "${host_dev}" "root" "tbf" "rate" "${rate_limit}" "burst" "${burst_buf:-512kb}")
+            if [[ -n "${queue_limit}" ]]; then
+                tbf_cmd+=("limit" "${queue_limit}")
+            else
+                tbf_cmd+=("latency" "50ms")
+            fi
+            "${tbf_cmd[@]}" 2>/dev/null || true
+            ip link set dev "${host_dev}" txqueuelen 10000 2>/dev/null || true
+            ip -n "${client_ns}" link set dev eth0 txqueuelen 10000 2>/dev/null || true
+        fi
+    }
+
+    # 3. Attach PC Client (Gigabit Ethernet)
+    log_info "Connecting PC LAN client (${PC_NS:-ns-pc}) to ${LAN_BRIDGE:-br-test-lan}..."
+    attach_client_to_lan_bridge "${PC_NS:-ns-pc}" "v-pc-h" "${PC_IP:-192.168.1.10}" "${PC_RATE_LIMIT:-1000mbit}" "${PC_BURST_BUFFER:-512kb}" ""
+
+    # 4. Attach IPTV STB Client (100 Mbps Fast Ethernet Link Mismatch)
+    log_info "Connecting IPTV STB client (${STB_NS:-ns-stb}) with 100M rate limit..."
+    attach_client_to_lan_bridge "${STB_NS:-ns-stb}" "v-stb-h" "${STB_IP:-192.168.1.20}" \
+        "${STB_RATE_LIMIT:-100mbit}" "${STB_QUEUE_BURST_BUFFER:-512kb}" "${STB_QUEUE_LIMIT:-4mb}"
+
+    # If physical STB adapter is configured, attach to LAN bridge
+    if [[ -n "${stb_if}" ]] && iface_exists_root "${stb_if}"; then
+        unmanage_interface "${stb_if}"
+        attach_physical_to_bridge "${stb_if}" "${LAN_BRIDGE:-br-test-lan}"
+        log_info "Bound physical STB interface (${stb_if}) to ${LAN_BRIDGE:-br-test-lan}"
     fi
 
-    # 4. Optional dedicated physical Wi-Fi / Phone interfaces
-    local wlan_map=(
-        "${WLAN2G_NS:-ns-wlan2g}:${WLAN2G_IF:-}:${WLAN2G_IP:-192.168.1.31}"
-        "${WLAN5G_NS:-ns-wlan5g}:${WLAN5G_IF:-}:${WLAN5G_IP:-192.168.1.32}"
-        "${WLAN6G_NS:-ns-wlan6g}:${WLAN6G_IF:-}:${WLAN6G_IP:-192.168.1.33}"
-        "${PHONE1_NS:-ns-phone1}:${PHONE1_IF:-}:${PHONE1_IP:-192.168.1.41}"
-        "${PHONE2_NS:-ns-phone2}:${PHONE2_IF:-}:${PHONE2_IP:-192.168.1.42}"
-    )
+    # 5. Attach Simulated Wireless Clients (2.4 GHz, 5 GHz, 6 GHz)
+    log_info "Connecting Tri-band wireless clients (2.4GHz, 5GHz, 6GHz)..."
+    attach_client_to_lan_bridge "${WLAN2G_NS:-ns-wlan2g}" "v-w2g-h" "${WLAN2G_IP:-192.168.1.31}" "" "" ""
+    attach_client_to_lan_bridge "${WLAN5G_NS:-ns-wlan5g}" "v-w5g-h" "${WLAN5G_IP:-192.168.1.32}" "" "" ""
+    attach_client_to_lan_bridge "${WLAN6G_NS:-ns-wlan6g}" "v-w6g-h" "${WLAN6G_IP:-192.168.1.33}" "" "" ""
 
-    local item w_ns w_if w_ip
-    for item in "${wlan_map[@]}"; do
-        w_ns="${item%%:*}"
-        w_if="${item#*:}"
-        w_ip="${w_if#*:}"
-        w_if="${w_if%%:*}"
+    # 6. Attach Wi-Fi Phones (VoIP Clients)
+    log_info "Connecting Wi-Fi phone clients (phone1, phone2)..."
+    attach_client_to_lan_bridge "${PHONE1_NS:-ns-phone1}" "v-ph1-h" "${PHONE1_IP:-192.168.1.41}" "" "" ""
+    attach_client_to_lan_bridge "${PHONE2_NS:-ns-phone2}" "v-ph2-h" "${PHONE2_IP:-192.168.1.42}" "" "" ""
 
-        if [[ -n "${w_if}" ]]; then
-            ns_create "${w_ns}"
-            unmanage_interface "${w_if}"
-            ip link set "${w_if}" netns "${w_ns}"
-            ip -n "${w_ns}" link set "${w_if}" name "eth0"
-            ip -n "${w_ns}" link set "eth0" up
-            ip -n "${w_ns}" addr add "${w_ip}/${LAN_PREFIX:-24}" dev eth0
-            ip -n "${w_ns}" route replace default via "${DUT_LAN_IP:-192.168.1.1}" dev eth0
-            log_info "Bound physical wireless/phone adapter (${w_if}) to ${w_ns} (IP: ${w_ip})"
+    # 7. Tune buffer limits
+    for ns in "${WAN_NS:-ns-wan}" "${PC_NS:-ns-pc}" "${STB_NS:-ns-stb}"; do
+        if ns_exists "${ns}"; then
+            ip netns exec "${ns}" sysctl -q -w net.core.rmem_max=16777216 2>/dev/null || true
+            ip netns exec "${ns}" sysctl -q -w net.core.wmem_max=16777216 2>/dev/null || true
+            ip netns exec "${ns}" sysctl -q -w net.core.netdev_max_backlog=10000 2>/dev/null || true
         fi
     done
 
-    # 5. Tune network buffer limits across all active namespaces
-    local active_ns
-    for active_ns in "${WAN_NS:-ns-wan}" "${PC_NS:-ns-pc}" "${STB_NS:-ns-stb}"; do
-        if ns_exists "${active_ns}"; then
-            ip netns exec "${active_ns}" sysctl -q -w net.core.rmem_max=16777216 2>/dev/null || true
-            ip netns exec "${active_ns}" sysctl -q -w net.core.wmem_max=16777216 2>/dev/null || true
-            ip netns exec "${active_ns}" sysctl -q -w net.core.netdev_max_backlog=10000 2>/dev/null || true
-        fi
-    done
-
-    # 6. Start Upstream WAN DHCP server to lease IP to DUT WAN port
+    # 8. Start Upstream WAN DHCP server to lease IP to DUT WAN port
     if (( ${WAN_DHCP_ENABLE:-1} == 1 )) && [[ -x "${SCRIPT_DIR}/wan_server.sh" ]]; then
         log_info "Activating upstream WAN DHCP server via wan_server.sh..."
         "${SCRIPT_DIR}/wan_server.sh" start "${WAN_DHCP_BACKEND:-auto}" || true
     fi
 
-    # 7. Start LAN client dynamic DHCP daemons in background (non-blocking)
+    # 9. Start LAN client dynamic DHCP daemons in background (non-blocking)
     if (( ${LAN_DHCP_CLIENT:-1} == 1 )) && [[ -x "${SCRIPT_DIR}/client_dhcp.sh" ]]; then
         log_info "Activating LAN client dynamic DHCP daemons via client_dhcp.sh (non-blocking)..."
         "${SCRIPT_DIR}/client_dhcp.sh" start all || true
     fi
 
-    log_success "Physical Multi-Port topology successfully established."
+    log_success "Physical Multi-Port topology successfully established via Linux Bridges."
 }
 
 # Defensive: Atomic state file persistence
@@ -411,6 +427,8 @@ save_topology_state() {
     cat > "${temp_state}" <<EOF
 TOPOLOGY_ACTIVE="1"
 TOPOLOGY_MODE="${TOPOLOGY_MODE}"
+WAN_BRIDGE="${WAN_BRIDGE:-br-test-wan}"
+LAN_BRIDGE="${LAN_BRIDGE:-br-test-lan}"
 WAN_NS="${WAN_NS:-ns-wan}"
 DUT_NS="${DUT_NS:-ns-dut}"
 PC_NS="${PC_NS:-ns-pc}"

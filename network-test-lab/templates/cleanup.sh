@@ -134,7 +134,8 @@ main() {
 
     # 4. Delete virtual interfaces (host-side veth ends)
     local veth
-    for veth in veth-wan veth-dutwan veth-dut-pc veth-dut-stb veth-dut-w2g veth-dut-w5g veth-dut-w6g veth-dut-ph1 veth-dut-ph2; do
+    for veth in v-wan-h v-pc-h v-stb-h v-w2g-h v-w5g-h v-w6g-h v-ph1-h v-ph2-h \
+                veth-wan veth-dutwan veth-dut-pc veth-dut-stb veth-dut-w2g veth-dut-w5g veth-dut-w6g veth-dut-ph1 veth-dut-ph2; do
         if ip link show dev "${veth}" >/dev/null 2>&1; then
             ip link del dev "${veth}" 2>/dev/null || true
         fi
